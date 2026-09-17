@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Inventario · Cava</title>
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="gateOverlay" class="modal-overlay">
+  <div class="modal-box">
+    <h4>Inventario Cava</h4>
+    <div class="modal-body-grid">
+      <label>Clave de acceso
+        <input type="password" id="gatePassword" placeholder="Clave">
+      </label>
+      <div id="gateError" class="alerta-box" hidden>Clave incorrecta.</div>
+    </div>
+    <div class="modal-actions">
+      <button type="button" class="btn-primary" id="gateEntrar" style="width:100%">Entrar</button>
+    </div>
+  </div>
+</div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-dot"></span>
+    <span class="brand-title">Inventario Cava</span>
+  </div>
+  <nav class="tabs" id="tabs">
+    <button class="tab-btn active" data-tab="resumen">Resumen</button>
+    <button class="tab-btn" data-tab="inventario">Inventario</button>
+    <button class="tab-btn" data-tab="despacho">Despacho</button>
+    <button class="tab-btn" data-tab="historial">Historial</button>
+    <button class="tab-btn" data-tab="productos">Productos</button>
+  </nav>
+  <div class="topbar-actions">
+    <label class="fecha-label">Fecha de trabajo
+      <input type="date" id="fechaTrabajo">
+    </label>
+    <button id="btnBackup" class="btn-ghost" title="Descargar respaldo completo">⤓ Respaldo</button>
+  </div>
+</header>
+
+<main id="app">
+
+  <!-- RESUMEN -->
+  <section class="tab-panel active" id="tab-resumen">
+    <div class="kpi-grid">
+      <div class="kpi-card kpi-blue">
+        <span class="kpi-label">Productos en catálogo</span>
+        <span class="kpi-value" id="kpiTotalProductos">0</span>
+      </div>
+      <div class="kpi-card kpi-green">
+        <span class="kpi-label">Inventariados hoy</span>
+        <span class="kpi-value" id="kpiInventariadosHoy">0</span>
+      </div>
+      <div class="kpi-card kpi-gold">
+        <span class="kpi-label">Despachados hoy</span>
+        <span class="kpi-value" id="kpiDespachadosHoy">0</span>
+      </div>
+      <div class="kpi-card kpi-danger">
+        <span class="kpi-label">Diferencias hoy</span>
+        <span class="kpi-value" id="kpiDiferenciasHoy">0</span>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Cómo funciona</h3>
+      <ol class="pasos-lista">
+        <li><strong>Inventario</strong> — al final del día se cuenta lo que quedó en la cava (por producto, en kg o unidades) y queda guardado como el stock actual.</li>
+        <li><strong>Despacho</strong> — al día siguiente se reparte ese stock entre Bello Colores y Puntos Expres. El sistema muestra cuánto había, cuánto se despacha y cuánto queda.</li>
+        <li><strong>Nuevo inventario</strong> — al final de ese día se vuelve a contar. Si el conteo no coincide con lo que debía quedar, el sistema pide un motivo (merma, error de conteo, etc.) y lo deja registrado en el Historial.</li>
+      </ol>
+    </div>
+    <div class="panel">
+      <h3>Últimos movimientos</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Producto</th><th>Detalle</th></tr></thead>
+          <tbody id="resumenUltimos"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- INVENTARIO -->
+  <section class="tab-panel" id="tab-inventario">
+    <div class="panel">
+      <div class="panel-title-row">
+        <h3>Registrar inventario (panel de ingresos)</h3>
+        <span class="hint">Busca el producto por código o nombre y registra lo que quedó en la cava.</span>
+      </div>
+      <input type="text" id="buscarInventario" class="input-search" placeholder="Buscar por código o nombre...">
+      <div class="filtro-chip-row">
+        <button class="chip active" data-filtro="todos">Todos</button>
+        <button class="chip" data-filtro="pendientes">Pendientes hoy</button>
+        <button class="chip" data-filtro="hechos">Ya inventariados hoy</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Código</th><th>Producto</th><th>Unidad</th><th>Stock actual</th><th>Hoy</th><th></th></tr></thead>
+          <tbody id="tablaInventario"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- DESPACHO -->
+  <section class="tab-panel" id="tab-despacho">
+    <div class="panel">
+      <div class="panel-title-row">
+        <h3>Registrar despacho</h3>
+        <span class="hint">Reparte lo inventariado entre Bello Colores y Puntos Expres.</span>
+      </div>
+      <input type="text" id="buscarDespacho" class="input-search" placeholder="Buscar por código o nombre...">
+      <div class="filtro-chip-row">
+        <button class="chip active" data-filtro="todos">Todos</button>
+        <button class="chip" data-filtro="disponibles">Con stock disponible</button>
+        <button class="chip" data-filtro="despachados">Despachados hoy</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Código</th><th>Producto</th><th>Unidad</th><th>Disponible</th><th>Despachado hoy</th><th></th></tr></thead>
+          <tbody id="tablaDespacho"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- HISTORIAL -->
+  <section class="tab-panel" id="tab-historial">
+    <div class="panel">
+      <div class="panel-title-row"><h3>Historial de movimientos</h3></div>
+      <div class="filtros-bar">
+        <select id="filtroTipo">
+          <option value="">Todos los tipos</option>
+          <option value="inventario">Inventario</option>
+          <option value="despacho">Despacho</option>
+        </select>
+        <input type="text" id="filtroProductoTexto" placeholder="Filtrar por código o nombre...">
+        <input type="date" id="filtroDesde">
+        <input type="date" id="filtroHasta">
+        <button id="btnFiltrarHistorial" class="btn-ghost">Filtrar</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Producto</th><th>Detalle</th><th>Notas</th><th></th></tr></thead>
+          <tbody id="tablaHistorial"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title-row"><h3>Diferencias registradas</h3></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fecha</th><th>Producto</th><th>Esperado</th><th>Real</th><th>Diferencia</th><th>Motivo</th><th>Nota</th></tr></thead>
+          <tbody id="tablaDiferencias"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- PRODUCTOS -->
+  <section class="tab-panel" id="tab-productos">
+    <div class="panel">
+      <h3 id="formProductoTitulo">Nuevo producto</h3>
+      <form id="formProducto" class="form-grid">
+        <input type="hidden" id="prodId">
+        <label>Código
+          <input type="text" id="prodCodigo" required>
+        </label>
+        <label>Nombre del producto
+          <input type="text" id="prodNombre" required>
+        </label>
+        <label>Unidad
+          <select id="prodUnidad">
+            <option value="KG">KG (peso)</option>
+            <option value="UND">UND (unidades)</option>
+          </select>
+        </label>
+        <div class="form-actions">
+          <button type="submit" class="btn-primary" id="btnGuardarProducto">Guardar producto</button>
+          <button type="button" class="btn-ghost" id="btnCancelarProducto" hidden>Cancelar edición</button>
+        </div>
+      </form>
+    </div>
+    <div class="panel">
+      <div class="panel-title-row"><h3>Catálogo de productos</h3></div>
+      <input type="text" id="buscarProducto" class="input-search" placeholder="Buscar por código o nombre...">
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Código</th><th>Producto</th><th>Unidad</th><th>Acciones</th></tr></thead>
+          <tbody id="tablaProductos"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div id="toast" class="toast" hidden></div>
+
+<div id="modalOverlay" class="modal-overlay" hidden>
+  <div class="modal-box">
+    <h4 id="modalTitulo">Título</h4>
+    <div id="modalBody"></div>
+    <div class="modal-actions">
+      <button type="button" class="btn-ghost" id="modalCancelar">Cancelar</button>
+      <button type="button" class="btn-primary" id="modalConfirmar">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script src="js/config.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
