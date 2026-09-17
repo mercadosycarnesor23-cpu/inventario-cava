@@ -69,7 +69,7 @@
       <h3>Cómo funciona</h3>
       <ol class="pasos-lista">
         <li><strong>Inventario</strong> — al final del día se cuenta lo que quedó en la cava (por producto, en kg o unidades) y queda guardado como el stock actual.</li>
-        <li><strong>Despacho</strong> — al día siguiente se reparte ese stock entre Bello Colores y Puntos Expres. El sistema muestra cuánto había, cuánto se despacha y cuánto queda.</li>
+        <li><strong>Despacho</strong> — al día siguiente se reparte ese stock entre Bello, Colores y Puntos Expres. El sistema muestra cuánto había, cuánto se despacha y cuánto queda.</li>
         <li><strong>Nuevo inventario</strong> — al final de ese día se vuelve a contar. Si el conteo no coincide con lo que debía quedar, el sistema pide un motivo (merma, error de conteo, etc.) y lo deja registrado en el Historial.</li>
       </ol>
     </div>
@@ -89,18 +89,20 @@
     <div class="panel">
       <div class="panel-title-row">
         <h3>Registrar inventario (panel de ingresos)</h3>
-        <span class="hint">Busca el producto por código o nombre y registra lo que quedó en la cava.</span>
+        <span class="hint">Busca el producto y agrégalo al inventario de hoy.</span>
       </div>
-      <input type="text" id="buscarInventario" class="input-search" placeholder="Buscar por código o nombre...">
-      <div class="filtro-chip-row">
-        <button class="chip active" data-filtro="todos">Todos</button>
-        <button class="chip" data-filtro="pendientes">Pendientes hoy</button>
-        <button class="chip" data-filtro="hechos">Ya inventariados hoy</button>
+      <div class="buscador-wrap">
+        <input type="text" id="buscarInventario" class="input-search" placeholder="Buscar por código o nombre...">
+        <div class="dropdown-resultados" id="dropdownInventario" hidden></div>
       </div>
+      <div class="panel-inline-form" id="formInventarioInline" hidden></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title-row"><h3>Inventario de hoy</h3></div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Código</th><th>Producto</th><th>Unidad</th><th>Stock actual</th><th>Hoy</th><th></th></tr></thead>
-          <tbody id="tablaInventario"></tbody>
+          <thead><tr><th>Código</th><th>Producto</th><th>Cantidad</th><th>Notas</th><th></th></tr></thead>
+          <tbody id="tablaInventarioHoy"></tbody>
         </table>
       </div>
     </div>
@@ -111,18 +113,23 @@
     <div class="panel">
       <div class="panel-title-row">
         <h3>Registrar despacho</h3>
-        <span class="hint">Reparte lo inventariado entre Bello Colores y Puntos Expres.</span>
+        <span class="hint">Busca el producto y reparte entre Bello, Colores y Puntos Expres.</span>
       </div>
-      <input type="text" id="buscarDespacho" class="input-search" placeholder="Buscar por código o nombre...">
-      <div class="filtro-chip-row">
-        <button class="chip active" data-filtro="todos">Todos</button>
-        <button class="chip" data-filtro="disponibles">Con stock disponible</button>
-        <button class="chip" data-filtro="despachados">Despachados hoy</button>
+      <div class="buscador-wrap">
+        <input type="text" id="buscarDespacho" class="input-search" placeholder="Buscar por código o nombre...">
+        <div class="dropdown-resultados" id="dropdownDespacho" hidden></div>
+      </div>
+      <div class="panel-inline-form" id="formDespachoInline" hidden></div>
+    </div>
+    <div class="panel">
+      <div class="panel-title-row">
+        <h3>Despachado hoy</h3>
+        <span class="hint">Diferencia = lo que había según el inventario de ayer, menos lo despachado hoy.</span>
       </div>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Código</th><th>Producto</th><th>Unidad</th><th>Disponible</th><th>Despachado hoy</th><th></th></tr></thead>
-          <tbody id="tablaDespacho"></tbody>
+          <thead><tr><th>Hora</th><th>Código</th><th>Producto</th><th>Bello</th><th>Colores</th><th>Puntos Expres</th><th>Diferencia</th><th></th></tr></thead>
+          <tbody id="tablaDespachoHoy"></tbody>
         </table>
       </div>
     </div>
@@ -156,6 +163,18 @@
         <table>
           <thead><tr><th>Fecha</th><th>Producto</th><th>Esperado</th><th>Real</th><th>Diferencia</th><th>Motivo</th><th>Nota</th></tr></thead>
           <tbody id="tablaDiferencias"></tbody>
+        </table>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title-row">
+        <h3>Correcciones a inventarios de días anteriores</h3>
+        <span class="hint">Registro de por qué se editó o eliminó un conteo que no era del día.</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fecha del conteo</th><th>Producto</th><th>Acción</th><th>Antes</th><th>Después</th><th>Motivo</th><th>Nota</th></tr></thead>
+          <tbody id="tablaCorrecciones"></tbody>
         </table>
       </div>
     </div>
