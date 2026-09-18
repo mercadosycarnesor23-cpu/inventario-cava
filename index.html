@@ -112,6 +112,16 @@
   <section class="tab-panel" id="tab-despacho">
     <div class="panel">
       <div class="panel-title-row">
+        <h3>Sugerido del día (opcional)</h3>
+        <span class="hint">Pega aquí el rango copiado de la hoja de Google Sheets (columnas código, producto, unidad, Bello...M) para la fecha de trabajo de arriba.</span>
+      </div>
+      <textarea id="sugeridoTexto" class="input-search" style="min-height:100px; font-family:monospace; font-size:12.5px;" placeholder="Pega aquí (Ctrl+V) lo copiado de la hoja..."></textarea>
+      <div class="form-actions">
+        <button type="button" class="btn-primary" id="btnImportarSugerido">Importar sugerido</button>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="panel-title-row">
         <h3>Registrar despacho</h3>
         <span class="hint">Busca el producto y reparte entre Bello, Colores y Puntos Expres.</span>
       </div>
