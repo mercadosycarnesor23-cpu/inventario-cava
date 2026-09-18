@@ -758,17 +758,26 @@ document.getElementById("btnImportarSugerido").addEventListener("click", async (
    DESPACHO
    ========================================================================== */
 
+function celdaConPedido(valor, pedido, unidad) {
+  const pedidoHtml = pedido !== null
+    ? `<div style="font-size:10.5px;color:var(--muted);line-height:1.3">Pedido: ${fmt(pedido, unidad)}</div>`
+    : "";
+  return `<td>${pedidoHtml}${fmt(valor, unidad)}</td>`;
+}
+
 function filaDespachoHoy(d) {
   const p = productosPorId[d.productoId];
   const unidad = p ? p.unidad : "";
+  const it = estado.find(e => e.id === d.productoId);
+  const tieneSugerido = it && it.tieneSugerido;
   return `
     <tr>
       <td>${d.hora || ""}</td>
       <td>${p ? escapeHtml(p.codigo) : "-"}</td>
       <td>${p ? escapeHtml(p.nombre) : "(eliminado)"}</td>
-      <td>${fmt(d.bello, unidad)}</td>
-      <td>${fmt(d.colores, unidad)}</td>
-      <td>${fmt(d.puntosExpres, unidad)}</td>
+      ${celdaConPedido(d.bello, tieneSugerido ? it.sugeridoBello : null, unidad)}
+      ${celdaConPedido(d.colores, tieneSugerido ? it.sugeridoColores : null, unidad)}
+      ${celdaConPedido(d.puntosExpres, tieneSugerido ? it.sugeridoExpres : null, unidad)}
       <td>${fmt(d.queda, unidad)}</td>
       <td><button class="btn-icon danger" data-quitar-desp="${d.id}">✕</button></td>
     </tr>
@@ -818,7 +827,7 @@ function seleccionarProductoDespacho(productoId) {
 
   const step = p.unidad === "UND" ? "1" : "0.01";
   const sugerido = it.tieneSugerido
-    ? `<div class="hint" style="margin-bottom:10px">Sugerido de hoy: <strong>Bello ${fmt(it.sugeridoBello, p.unidad)} · Colores ${fmt(it.sugeridoColores, p.unidad)} · Expres ${fmt(it.sugeridoExpres, p.unidad)}</strong> (ya viene precargado abajo, puedes ajustarlo)</div>`
+    ? `<div class="hint" style="margin-bottom:10px">Piden: <strong>Bello ${fmt(it.sugeridoBello, p.unidad)} · Colores ${fmt(it.sugeridoColores, p.unidad)} · Expres ${fmt(it.sugeridoExpres, p.unidad)}</strong> — con eso es suficiente</div>`
     : "";
   container.innerHTML = `
     <div class="producto-elegido">${escapeHtml(p.codigo)} · ${escapeHtml(p.nombre)}</div>
@@ -826,13 +835,13 @@ function seleccionarProductoDespacho(productoId) {
     ${sugerido}
     <div class="form-grid">
       <label>Bello
-        <input type="number" id="despBello" min="0" step="${step}" value="${it.sugeridoBello || 0}">
+        <input type="number" id="despBello" min="0" step="${step}" value="0">
       </label>
       <label>Colores
-        <input type="number" id="despColores" min="0" step="${step}" value="${it.sugeridoColores || 0}">
+        <input type="number" id="despColores" min="0" step="${step}" value="0">
       </label>
       <label>Puntos Expres
-        <input type="number" id="despExpres" min="0" step="${step}" value="${it.sugeridoExpres || 0}">
+        <input type="number" id="despExpres" min="0" step="${step}" value="0">
       </label>
     </div>
     <div class="calc-line" id="calcDespacho">Despachando: <strong>0</strong> · Queda: <strong>${fmt(it.stockActual, p.unidad)}</strong></div>
