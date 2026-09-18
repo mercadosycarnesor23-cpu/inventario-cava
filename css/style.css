@@ -36,6 +36,7 @@ body {
 
 .brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 17px; }
 .brand-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--green); display: inline-block; }
+.brand-icon { font-size: 20px; line-height: 1; }
 
 .tabs { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
 .tab-btn {
