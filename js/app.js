@@ -148,6 +148,8 @@ function mapInventario(row) {
   return {
     tipo: "inventario", id: row.id, productoId: row.producto_id, fecha: row.fecha, hora: row.hora,
     modo: row.modo, valor: Number(row.valor), notas: row.notas, creadoEn: row.creado_en,
+    pesoBruto: row.peso_bruto === null || row.peso_bruto === undefined ? null : Number(row.peso_bruto),
+    numCanastas: row.num_canastas === null || row.num_canastas === undefined ? null : Number(row.num_canastas),
   };
 }
 function mapDespacho(row) {
@@ -264,6 +266,9 @@ async function cargarEstado() {
       stockActual: s ? Number(s.valor) : null, stockFecha: s ? s.fecha : null, stockOrigen: s ? s.origen : null,
       inventarioId: inv ? inv.id : null, inventariadoHoy: !!inv,
       inventarioHoyValor: inv ? inv.valor : null, inventarioHoyNotas: inv ? inv.notas : null,
+      inventarioHoyHora: inv ? inv.hora : null,
+      inventarioHoyPesoBruto: inv ? inv.pesoBruto : null,
+      inventarioHoyNumCanastas: inv ? inv.numCanastas : null,
       despachadoHoyTotal: d.total, despachadoHoyBello: d.bello, despachadoHoyColores: d.colores, despachadoHoyExpres: d.expres,
       sugeridoBello: sug ? Number(sug.bello) : 0, sugeridoColores: sug ? Number(sug.colores) : 0, sugeridoExpres: sug ? Number(sug.puntos_expres) : 0,
       tieneSugerido: !!sug,
@@ -349,6 +354,44 @@ function renderInventarioHoy() {
   tbody.querySelectorAll("[data-editar-inv]").forEach(b => b.addEventListener("click", () => seleccionarProductoInventario(b.dataset.editarInv, true)));
   tbody.querySelectorAll("[data-quitar-inv]").forEach(b => b.addEventListener("click", () => quitarInventario(b.dataset.quitarInv)));
 }
+
+/* Copiar el inventario de hoy al portapapeles en columnas separadas por tabulador,
+   en el mismo orden de Libro1.xlsx: Peso bruto, Canastas 2.2, (C,D,E vacías),
+   Codigo, producto, Peso neto, Destino, Salida, Fecha, Hora. Al pegarlo con Ctrl+V
+   en Excel cada valor cae en su propia columna. */
+function numExcel(n) {
+  if (n === null || n === undefined) return "";
+  return Number(n).toLocaleString("es-CO", { useGrouping: false, maximumFractionDigits: 2 });
+}
+function fechaExcel(iso) {
+  if (!iso) return "";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+}
+async function copiarInventarioParaExcel() {
+  const filas = estado.filter(it => it.inventariadoHoy);
+  if (filas.length === 0) { toast("No hay productos en el inventario de hoy todavía", true); return; }
+  const fechaTexto = fechaExcel(fechaTrabajo());
+  const lineas = filas.map(it => {
+    const esKg = it.unidad === "KG";
+    const bruto = esKg ? numExcel(it.inventarioHoyPesoBruto !== null ? it.inventarioHoyPesoBruto : it.inventarioHoyValor) : "";
+    const canastas = esKg ? numExcel(it.inventarioHoyNumCanastas !== null ? it.inventarioHoyNumCanastas : 0) : "";
+    const columnas = [
+      bruto, canastas, "", "", "",
+      it.codigo, it.nombre, numExcel(it.inventarioHoyValor),
+      "INVENTARIO", "1", fechaTexto, it.inventarioHoyHora || "",
+    ];
+    return columnas.join("\t");
+  });
+  const texto = lineas.join("\n");
+  try {
+    await navigator.clipboard.writeText(texto);
+    toast(`Copiado: ${filas.length} producto(s). Pégalo con Ctrl+V en tu Excel.`);
+  } catch (err) {
+    toast("No se pudo copiar automáticamente (revisa permisos del navegador)", true);
+  }
+}
+document.getElementById("btnCopiarExcel").addEventListener("click", copiarInventarioParaExcel);
 
 /* Modal generico para pedir un motivo al editar o eliminar un conteo de un dia anterior. */
 function abrirModalMotivoCorreccion(titulo, mensajeExtra, onConfirmar) {
