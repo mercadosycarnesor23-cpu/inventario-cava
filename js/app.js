@@ -197,12 +197,13 @@ async function cargarProductos() {
 
 async function cargarEstado() {
   const fecha = fechaTrabajo();
-  const [{ data: stockRows, error: e1 }, { data: invHoy, error: e2 }, { data: despHoy, error: e3 }] = await Promise.all([
+  const [{ data: stockRows, error: e1 }, { data: invHoy, error: e2 }, { data: despHoy, error: e3 }, { data: sugHoy, error: e4 }] = await Promise.all([
     sb.from("stock").select("*"),
     sb.from("inventarios").select("*").eq("fecha", fecha),
     sb.from("despachos").select("*").eq("fecha", fecha),
+    sb.from("sugeridos").select("*").eq("fecha", fecha),
   ]);
-  throwIfError(e1); throwIfError(e2); throwIfError(e3);
+  throwIfError(e1); throwIfError(e2); throwIfError(e3); throwIfError(e4);
 
   const stockPorProd = {};
   (stockRows || []).forEach(r => { stockPorProd[r.producto_id] = r; });
@@ -219,16 +220,22 @@ async function cargarEstado() {
     despPorProd[r.productoId].expres += r.puntosExpres;
   });
 
+  const sugPorProd = {};
+  (sugHoy || []).forEach(r => { sugPorProd[r.producto_id] = r; });
+
   estado = productos.map(p => {
     const s = stockPorProd[p.id];
     const inv = invPorProd[p.id];
     const d = despPorProd[p.id] || { total: 0, bello: 0, colores: 0, expres: 0 };
+    const sug = sugPorProd[p.id];
     return {
       id: p.id, codigo: p.codigo, nombre: p.nombre, unidad: p.unidad,
       stockActual: s ? Number(s.valor) : null, stockFecha: s ? s.fecha : null, stockOrigen: s ? s.origen : null,
       inventarioId: inv ? inv.id : null, inventariadoHoy: !!inv,
       inventarioHoyValor: inv ? inv.valor : null, inventarioHoyNotas: inv ? inv.notas : null,
       despachadoHoyTotal: d.total, despachadoHoyBello: d.bello, despachadoHoyColores: d.colores, despachadoHoyExpres: d.expres,
+      sugeridoBello: sug ? Number(sug.bello) : 0, sugeridoColores: sug ? Number(sug.colores) : 0, sugeridoExpres: sug ? Number(sug.puntos_expres) : 0,
+      tieneSugerido: !!sug,
     };
   });
 }
@@ -683,6 +690,64 @@ function abrirModalMotivoInventario(p, cuerpoOriginal, info) {
 }
 
 /* ==========================================================================
+   SUGERIDO DEL DIA (importado desde Google Sheets, pegando el rango copiado)
+   ========================================================================== */
+
+// Interpreta el texto pegado desde la hoja "PEDIDO LEGUMBRE OR": cada fila es
+// codigo, producto, unidad, Bello, Colores, y de ahi en adelante (hasta la
+// columna M) el resto de los puntos, que se suman como Puntos Expres.
+async function importarSugeridos(texto, fecha) {
+  const parseNum = (v) => {
+    const n = Number(String(v ?? "").replace(/,/g, "").trim());
+    return isNaN(n) ? 0 : n;
+  };
+  const filas = texto.split(/\r?\n/).map(l => l.split("\t"));
+  const registros = [];
+  let encontrados = 0, noEncontrados = 0;
+
+  for (const cols of filas) {
+    const codigo = String(cols[0] ?? "").trim();
+    if (!codigo) continue;
+    const producto = productos.find(p => p.codigo.trim() === codigo);
+    if (!producto) { noEncontrados++; continue; }
+
+    const bello = parseNum(cols[3]);
+    const colores = parseNum(cols[4]);
+    let expres = 0;
+    for (let i = 5; i <= 12; i++) expres += parseNum(cols[i]);
+
+    if (bello === 0 && colores === 0 && expres === 0) continue;
+
+    registros.push({
+      producto_id: producto.id, fecha, bello, colores, puntos_expres: expres,
+      actualizado_en: new Date().toISOString(),
+    });
+    encontrados++;
+  }
+
+  if (registros.length > 0) {
+    const { error } = await sb.from("sugeridos").upsert(registros, { onConflict: "producto_id,fecha" });
+    throwIfError(error);
+  }
+  return { encontrados, noEncontrados };
+}
+
+document.getElementById("btnImportarSugerido").addEventListener("click", async () => {
+  const textarea = document.getElementById("sugeridoTexto");
+  const texto = textarea.value;
+  if (!texto.trim()) { toast("Pega primero los datos copiados de la hoja", true); return; }
+  try {
+    const { encontrados, noEncontrados } = await importarSugeridos(texto, fechaTrabajo());
+    if (encontrados === 0) { toast("No se reconoció ningún código en lo pegado", true); return; }
+    textarea.value = "";
+    toast(`Sugerido importado: ${encontrados} producto(s)` + (noEncontrados ? ` · ${noEncontrados} código(s) no encontrado(s)` : ""));
+    await refrescarTodo();
+  } catch (err) {
+    toast(err.message || "No se pudo importar el sugerido", true);
+  }
+});
+
+/* ==========================================================================
    DESPACHO
    ========================================================================== */
 
@@ -745,18 +810,22 @@ function seleccionarProductoDespacho(productoId) {
   }
 
   const step = p.unidad === "UND" ? "1" : "0.01";
+  const sugerido = it.tieneSugerido
+    ? `<div class="hint" style="margin-bottom:10px">Sugerido de hoy: <strong>Bello ${fmt(it.sugeridoBello, p.unidad)} · Colores ${fmt(it.sugeridoColores, p.unidad)} · Expres ${fmt(it.sugeridoExpres, p.unidad)}</strong> (ya viene precargado abajo, puedes ajustarlo)</div>`
+    : "";
   container.innerHTML = `
     <div class="producto-elegido">${escapeHtml(p.codigo)} · ${escapeHtml(p.nombre)}</div>
     <div class="hint" style="margin-bottom:10px">Disponible: <strong>${fmt(it.stockActual, p.unidad)}</strong></div>
+    ${sugerido}
     <div class="form-grid">
       <label>Bello
-        <input type="number" id="despBello" min="0" step="${step}" value="0">
+        <input type="number" id="despBello" min="0" step="${step}" value="${it.sugeridoBello || 0}">
       </label>
       <label>Colores
-        <input type="number" id="despColores" min="0" step="${step}" value="0">
+        <input type="number" id="despColores" min="0" step="${step}" value="${it.sugeridoColores || 0}">
       </label>
       <label>Puntos Expres
-        <input type="number" id="despExpres" min="0" step="${step}" value="0">
+        <input type="number" id="despExpres" min="0" step="${step}" value="${it.sugeridoExpres || 0}">
       </label>
     </div>
     <div class="calc-line" id="calcDespacho">Despachando: <strong>0</strong> · Queda: <strong>${fmt(it.stockActual, p.unidad)}</strong></div>
@@ -780,6 +849,7 @@ function seleccionarProductoDespacho(productoId) {
     el.classList.toggle("negativo", queda < 0);
   };
   ["despBello", "despColores", "despExpres"].forEach(id => document.getElementById(id).addEventListener("input", recalcular));
+  recalcular();
 
   document.getElementById("btnGuardarDespachoInline").addEventListener("click", () => confirmarDespachoInline(p));
   document.getElementById("btnCancelarDespachoInline").addEventListener("click", cerrarFormDespachoInline);
