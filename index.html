@@ -3,14 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>📦 Inventario</title>
+<title>Inventario · Mercados OR</title>
+<link rel="icon" type="image/svg+xml" href="img/logo-or.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Georama:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
 
 <div id="gateOverlay" class="modal-overlay">
   <div class="modal-box">
-    <h4>📦 Inventario</h4>
+    <h4>Inventario</h4>
     <div class="modal-body-grid">
       <label>Clave de acceso
         <input type="password" id="gatePassword" placeholder="Clave">
@@ -25,15 +29,14 @@
 
 <header class="topbar">
   <div class="brand">
-    <span class="brand-icon">📦</span>
     <span class="brand-title">Inventario</span>
   </div>
   <nav class="tabs" id="tabs">
-    <button class="tab-btn active" data-tab="resumen">Resumen</button>
-    <button class="tab-btn" data-tab="inventario">Inventario</button>
+    <button class="tab-btn active" data-tab="inventario">Inventario</button>
     <button class="tab-btn" data-tab="despacho">Despacho</button>
     <button class="tab-btn" data-tab="historial">Historial</button>
     <button class="tab-btn" data-tab="productos">Productos</button>
+    <button class="tab-btn" data-tab="resumen">Resumen</button>
   </nav>
   <div class="topbar-actions">
     <label class="fecha-label">Fecha de trabajo
@@ -45,47 +48,8 @@
 
 <main id="app">
 
-  <!-- RESUMEN -->
-  <section class="tab-panel active" id="tab-resumen">
-    <div class="kpi-grid">
-      <div class="kpi-card kpi-blue">
-        <span class="kpi-label">Productos en catálogo</span>
-        <span class="kpi-value" id="kpiTotalProductos">0</span>
-      </div>
-      <div class="kpi-card kpi-green">
-        <span class="kpi-label">Inventariados hoy</span>
-        <span class="kpi-value" id="kpiInventariadosHoy">0</span>
-      </div>
-      <div class="kpi-card kpi-gold">
-        <span class="kpi-label">Despachados hoy</span>
-        <span class="kpi-value" id="kpiDespachadosHoy">0</span>
-      </div>
-      <div class="kpi-card kpi-danger">
-        <span class="kpi-label">Diferencias hoy</span>
-        <span class="kpi-value" id="kpiDiferenciasHoy">0</span>
-      </div>
-    </div>
-    <div class="panel">
-      <h3>Cómo funciona</h3>
-      <ol class="pasos-lista">
-        <li><strong>Inventario</strong> — al final del día se cuenta lo que quedó en la cava (por producto, en kg o unidades) y queda guardado como el stock actual.</li>
-        <li><strong>Despacho</strong> — al día siguiente se reparte ese stock entre Bello, Colores y Puntos Expres. El sistema muestra cuánto había, cuánto se despacha y cuánto queda.</li>
-        <li><strong>Nuevo inventario</strong> — al final de ese día se vuelve a contar. Si el conteo no coincide con lo que debía quedar, el sistema pide un motivo (merma, error de conteo, etc.) y lo deja registrado en el Historial.</li>
-      </ol>
-    </div>
-    <div class="panel">
-      <h3>Últimos movimientos</h3>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Producto</th><th>Detalle</th></tr></thead>
-          <tbody id="resumenUltimos"></tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
   <!-- INVENTARIO -->
-  <section class="tab-panel" id="tab-inventario">
+  <section class="tab-panel active" id="tab-inventario">
     <div class="panel">
       <div class="panel-title-row">
         <h3>Registrar inventario (panel de ingresos)</h3>
@@ -221,6 +185,45 @@
         <table>
           <thead><tr><th>Código</th><th>Producto</th><th>Unidad</th><th>Acciones</th></tr></thead>
           <tbody id="tablaProductos"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- RESUMEN -->
+  <section class="tab-panel" id="tab-resumen">
+    <div class="kpi-grid">
+      <div class="kpi-card kpi-blue">
+        <span class="kpi-label">Productos en catálogo</span>
+        <span class="kpi-value" id="kpiTotalProductos">0</span>
+      </div>
+      <div class="kpi-card kpi-green">
+        <span class="kpi-label">Inventariados hoy</span>
+        <span class="kpi-value" id="kpiInventariadosHoy">0</span>
+      </div>
+      <div class="kpi-card kpi-gold">
+        <span class="kpi-label">Despachados hoy</span>
+        <span class="kpi-value" id="kpiDespachadosHoy">0</span>
+      </div>
+      <div class="kpi-card kpi-danger">
+        <span class="kpi-label">Diferencias hoy</span>
+        <span class="kpi-value" id="kpiDiferenciasHoy">0</span>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>Cómo funciona</h3>
+      <ol class="pasos-lista">
+        <li><strong>Inventario</strong> — al final del día se cuenta lo que quedó en la cava (por producto, en kg o unidades) y queda guardado como el stock actual.</li>
+        <li><strong>Despacho</strong> — al día siguiente se reparte ese stock entre Bello, Colores y Puntos Expres. El sistema muestra cuánto había, cuánto se despacha y cuánto queda.</li>
+        <li><strong>Nuevo inventario</strong> — al final de ese día se vuelve a contar. Si el conteo no coincide con lo que debía quedar, el sistema pide un motivo (merma, error de conteo, etc.) y lo deja registrado en el Historial.</li>
+      </ol>
+    </div>
+    <div class="panel">
+      <h3>Últimos movimientos</h3>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Producto</th><th>Detalle</th></tr></thead>
+          <tbody id="resumenUltimos"></tbody>
         </table>
       </div>
     </div>
