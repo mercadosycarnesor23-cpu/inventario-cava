@@ -8,5 +8,8 @@ window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXB
 
 /* Clave simple para que no cualquiera que encuentre el link entre a escribir datos.
    Esto NO es seguridad real (cualquiera que vea el codigo de la pagina puede
-   encontrarla), solo un freno basico. Cambiala por la que quieras. */
+   encontrarla), solo un freno basico. Cambiala por la que quieras.
+   Hay dos claves: una de edicion (puede registrar/editar/eliminar) y una de
+   solo consulta (puede ver todo pero no puede guardar ni borrar nada). */
 window.APP_PASSWORD = "OR2026";
+window.APP_PASSWORD_VIEW = "0000";

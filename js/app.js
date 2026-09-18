@@ -57,22 +57,42 @@ function throwIfError(error) {
   if (error) throw new Error(error.message || "Error de Supabase");
 }
 
-/* ---------- puerta de acceso (clave simple, no es seguridad real) ---------- */
+/* ---------- puerta de acceso (clave simple, no es seguridad real) ----------
+   Dos claves: una de edicion ("editar") y una de solo consulta ("ver"). El
+   rol se guarda en sessionStorage y se usa para ocultar los controles de
+   guardar/editar/eliminar y para bloquear esas acciones a nivel de datos. */
 
+function rolActual() {
+  return sessionStorage.getItem("inv_rol") || "";
+}
+function esSoloLectura() {
+  return rolActual() === "ver";
+}
+function aplicarRolEnPantalla() {
+  document.body.classList.toggle("rol-ver", esSoloLectura());
+  const badge = document.getElementById("badgeSoloLectura");
+  if (badge) badge.hidden = !esSoloLectura();
+}
 function abrirCompuerta() {
-  const ok = sessionStorage.getItem("inv_ok") === "1";
+  const ok = !!rolActual();
   document.getElementById("gateOverlay").hidden = ok;
+  aplicarRolEnPantalla();
 }
 document.getElementById("gateEntrar").addEventListener("click", intentarEntrar);
 document.getElementById("gatePassword").addEventListener("keydown", (e) => { if (e.key === "Enter") intentarEntrar(); });
 function intentarEntrar() {
   const val = document.getElementById("gatePassword").value;
   if (val === window.APP_PASSWORD) {
-    sessionStorage.setItem("inv_ok", "1");
-    document.getElementById("gateOverlay").hidden = true;
+    sessionStorage.setItem("inv_rol", "editar");
+  } else if (val === window.APP_PASSWORD_VIEW) {
+    sessionStorage.setItem("inv_rol", "ver");
   } else {
     document.getElementById("gateError").hidden = false;
+    return;
   }
+  document.getElementById("gateError").hidden = true;
+  document.getElementById("gateOverlay").hidden = true;
+  aplicarRolEnPantalla();
 }
 abrirCompuerta();
 
@@ -358,6 +378,7 @@ function abrirModalMotivoCorreccion(titulo, mensajeExtra, onConfirmar) {
 // que se esta tocando es de un dia anterior al de hoy (real), en vez de guardar
 // directamente -- asi la UI pide el motivo antes de continuar.
 async function guardarInventario(p, cuerpo) {
+  if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes guardar cambios.");
   const numCanastas = Number(cuerpo.numCanastas) || 0;
   const pesoCanasta = Number(cuerpo.pesoCanasta) > 0 ? Number(cuerpo.pesoCanasta) : 2.2;
   const valorIngresado = Number(cuerpo.valor) || 0;
@@ -462,6 +483,7 @@ async function guardarInventario(p, cuerpo) {
 // Elimina un conteo. Devuelve { requiereMotivoEdicion } en vez de borrar si el
 // registro es de un dia anterior al de hoy (real) y no viene motivo.
 async function eliminarInventarioCloud(id, motivoEdicion, motivoEdicionNota) {
+  if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes eliminar registros.");
   const { data: inv, error } = await sb.from("inventarios").select("*").eq("id", id).single();
   throwIfError(error);
   const ultimo = await ultimoMovimientoDeProducto(inv.producto_id);
@@ -708,6 +730,7 @@ function abrirModalMotivoInventario(p, cuerpoOriginal, info) {
 // codigo, producto, unidad, Bello, Colores, y de ahi en adelante (hasta la
 // columna M) el resto de los puntos, que se suman como Puntos Expres.
 async function importarSugeridos(texto, fecha) {
+  if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes importar el sugerido.");
   const parseNum = (v) => {
     const n = Number(String(v ?? "").replace(/,/g, "").trim());
     return isNaN(n) ? 0 : n;
@@ -892,6 +915,7 @@ function cerrarFormDespachoInline() {
 }
 
 async function guardarDespacho(p, cuerpo) {
+  if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes registrar despachos.");
   const stockRow = await fetchStockRow(p.id);
   if (!stockRow) throw new Error("Este producto no tiene inventario registrado todavia");
   const disponible = Number(stockRow.valor);
@@ -918,6 +942,7 @@ async function guardarDespacho(p, cuerpo) {
 }
 
 async function eliminarDespachoCloud(id) {
+  if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes eliminar despachos.");
   const { data: desp, error } = await sb.from("despachos").select("*").eq("id", id).single();
   throwIfError(error);
   const ultimo = await ultimoMovimientoDeProducto(desp.producto_id);
@@ -1160,6 +1185,7 @@ function resetFormProducto() {
 
 document.getElementById("formProducto").addEventListener("submit", async (e) => {
   e.preventDefault();
+  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes guardar productos.", true); return; }
   const cuerpo = {
     codigo: document.getElementById("prodCodigo").value.trim(),
     nombre: document.getElementById("prodNombre").value.trim(),
@@ -1187,6 +1213,7 @@ document.getElementById("formProducto").addEventListener("submit", async (e) => 
 });
 
 async function eliminarProducto(id) {
+  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes eliminar productos.", true); return; }
   const p = productosPorId[id];
   if (!p) return;
   if (!confirm(`¿Eliminar "${p.nombre}"? También se borrará su historial de inventario y despachos.`)) return;
