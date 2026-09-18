@@ -552,7 +552,7 @@ function seleccionarProductoInventario(productoId, modoEdicion = false) {
   container.innerHTML = `
     <div class="producto-elegido">${escapeHtml(p.codigo)} · ${escapeHtml(p.nombre)} ${badge}</div>
     ${camposHtml}
-    <label>Notas (opcional)
+    <label class="campo-simple">Notas (opcional)
       <input type="text" id="invNotas" placeholder="Opcional">
     </label>
     <div class="form-actions">
@@ -827,12 +827,14 @@ function seleccionarProductoDespacho(productoId) {
 
   const step = p.unidad === "UND" ? "1" : "0.01";
   const sugerido = it.tieneSugerido
-    ? `<div class="hint" style="margin-bottom:10px">Piden: <strong>Bello ${fmt(it.sugeridoBello, p.unidad)} · Colores ${fmt(it.sugeridoColores, p.unidad)} · Expres ${fmt(it.sugeridoExpres, p.unidad)}</strong> — con eso es suficiente</div>`
+    ? `<span class="sep">·</span><span>Piden: <strong>Bello ${fmt(it.sugeridoBello, p.unidad)} · Colores ${fmt(it.sugeridoColores, p.unidad)} · Expres ${fmt(it.sugeridoExpres, p.unidad)}</strong></span>`
     : "";
   container.innerHTML = `
     <div class="producto-elegido">${escapeHtml(p.codigo)} · ${escapeHtml(p.nombre)}</div>
-    <div class="hint" style="margin-bottom:10px">Disponible: <strong>${fmt(it.stockActual, p.unidad)}</strong></div>
-    ${sugerido}
+    <div class="datos-referencia">
+      <span>Disponible: <strong>${fmt(it.stockActual, p.unidad)}</strong></span>
+      ${sugerido}
+    </div>
     <div class="form-grid">
       <label>Bello
         <input type="number" id="despBello" min="0" step="${step}" value="0">
@@ -845,7 +847,7 @@ function seleccionarProductoDespacho(productoId) {
       </label>
     </div>
     <div class="calc-line" id="calcDespacho">Despachando: <strong>0</strong> · Queda: <strong>${fmt(it.stockActual, p.unidad)}</strong></div>
-    <label>Notas (opcional)
+    <label class="campo-simple">Notas (opcional)
       <input type="text" id="despNotas" placeholder="Opcional">
     </label>
     <div class="form-actions">
