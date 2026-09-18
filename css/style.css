@@ -47,6 +47,12 @@ body {
 .brand-logo { height: 34px; width: auto; display: block; }
 .brand-title { font-family: var(--font-display); font-weight: 800; letter-spacing: .2px; color: var(--azul); }
 
+.menu-toggle {
+  display: none; border: 1px solid var(--border); background: #fff; color: var(--azul);
+  font-size: 19px; line-height: 1; padding: 7px 11px; border-radius: 6px; cursor: pointer;
+}
+.menu-toggle:hover { background: var(--azul-claro); }
+
 .tabs { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; }
 .tab-btn {
   border: none; background: transparent; padding: 8px 14px; border-radius: 6px;
@@ -219,6 +225,13 @@ tbody tr:hover { background: #fafbfd; }
 
 @media (max-width: 720px) {
   .topbar { gap: 10px; }
-  .tabs { order: 3; width: 100%; }
+  .menu-toggle { display: inline-flex; align-items: center; justify-content: center; margin-left: auto; order: 1; }
+  .tabs {
+    display: none; order: 2; width: 100%; flex-direction: column; gap: 2px;
+    border-top: 1px solid var(--border); padding-top: 8px;
+  }
+  .tabs.open { display: flex; }
+  .tab-btn { width: 100%; text-align: left; padding: 10px 12px; }
+  .topbar-actions { order: 3; width: 100%; justify-content: space-between; margin-left: 0; }
   .split-row { grid-template-columns: 1fr; }
 }
