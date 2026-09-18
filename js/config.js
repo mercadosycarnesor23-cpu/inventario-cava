@@ -9,4 +9,4 @@ window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXB
 /* Clave simple para que no cualquiera que encuentre el link entre a escribir datos.
    Esto NO es seguridad real (cualquiera que vea el codigo de la pagina puede
    encontrarla), solo un freno basico. Cambiala por la que quieras. */
-window.APP_PASSWORD = "cava2026";
+window.APP_PASSWORD = "OR2026";
