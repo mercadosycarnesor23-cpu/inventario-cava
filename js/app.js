@@ -702,8 +702,11 @@ async function importarSugeridos(texto, fecha) {
     return isNaN(n) ? 0 : n;
   };
   const filas = texto.split(/\r?\n/).map(l => l.split("\t"));
-  const registros = [];
-  let encontrados = 0, noEncontrados = 0;
+  // Se acumula por producto_id (en vez de empujar directo a un arreglo) porque si el
+  // mismo codigo aparece repetido en lo pegado, Supabase rechaza un upsert que toque
+  // la misma fila (producto_id, fecha) dos veces en un solo envio.
+  const porProducto = new Map();
+  let noEncontrados = 0;
 
   for (const cols of filas) {
     const codigo = String(cols[0] ?? "").trim();
@@ -718,18 +721,22 @@ async function importarSugeridos(texto, fecha) {
 
     if (bello === 0 && colores === 0 && expres === 0) continue;
 
-    registros.push({
-      producto_id: producto.id, fecha, bello, colores, puntos_expres: expres,
-      actualizado_en: new Date().toISOString(),
+    const previo = porProducto.get(producto.id) || { bello: 0, colores: 0, expres: 0 };
+    porProducto.set(producto.id, {
+      bello: previo.bello + bello, colores: previo.colores + colores, expres: previo.expres + expres,
     });
-    encontrados++;
   }
+
+  const registros = Array.from(porProducto.entries()).map(([producto_id, v]) => ({
+    producto_id, fecha, bello: v.bello, colores: v.colores, puntos_expres: v.expres,
+    actualizado_en: new Date().toISOString(),
+  }));
 
   if (registros.length > 0) {
     const { error } = await sb.from("sugeridos").upsert(registros, { onConflict: "producto_id,fecha" });
     throwIfError(error);
   }
-  return { encontrados, noEncontrados };
+  return { encontrados: registros.length, noEncontrados };
 }
 
 document.getElementById("btnImportarSugerido").addEventListener("click", async () => {
