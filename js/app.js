@@ -361,7 +361,7 @@ function renderInventarioHoy() {
    en Excel cada valor cae en su propia columna. */
 function numExcel(n) {
   if (n === null || n === undefined) return "";
-  return Number(n).toLocaleString("es-CO", { useGrouping: false, maximumFractionDigits: 2 });
+  return String(Math.round(Number(n) * 100) / 100);
 }
 function fechaExcel(iso) {
   if (!iso) return "";
