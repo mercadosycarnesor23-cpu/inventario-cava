@@ -40,6 +40,7 @@
     <button class="tab-btn" data-tab="resumen">Resumen</button>
   </nav>
   <div class="topbar-actions">
+    <span id="badgeSoloLectura" class="badge badge-warn" hidden>Solo lectura</span>
     <label class="fecha-label">Fecha de trabajo
       <input type="date" id="fechaTrabajo">
     </label>
@@ -51,7 +52,7 @@
 
   <!-- INVENTARIO -->
   <section class="tab-panel active" id="tab-inventario">
-    <div class="panel">
+    <div class="panel solo-editor">
       <div class="panel-title-row">
         <h3>Registrar inventario (panel de ingresos)</h3>
         <span class="hint">Busca el producto y agrégalo al inventario de hoy.</span>
@@ -75,7 +76,7 @@
 
   <!-- DESPACHO -->
   <section class="tab-panel" id="tab-despacho">
-    <div class="panel">
+    <div class="panel solo-editor">
       <div class="panel-title-row">
         <h3>Sugerido del día (opcional)</h3>
         <span class="hint">Pega aquí el rango copiado de la hoja de Google Sheets (columnas código, producto, unidad, Bello...M) para la fecha de trabajo de arriba.</span>
@@ -85,7 +86,7 @@
         <button type="button" class="btn-primary" id="btnImportarSugerido">Importar sugerido</button>
       </div>
     </div>
-    <div class="panel">
+    <div class="panel solo-editor">
       <div class="panel-title-row">
         <h3>Registrar despacho</h3>
         <span class="hint">Busca el producto y reparte entre Bello, Colores y Puntos Expres.</span>
@@ -157,7 +158,7 @@
 
   <!-- PRODUCTOS -->
   <section class="tab-panel" id="tab-productos">
-    <div class="panel">
+    <div class="panel solo-editor">
       <h3 id="formProductoTitulo">Nuevo producto</h3>
       <form id="formProducto" class="form-grid">
         <input type="hidden" id="prodId">
