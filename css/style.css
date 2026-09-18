@@ -107,6 +107,19 @@ main#app { max-width: 1180px; margin: 0 auto; padding: 18px 20px 60px; }
 .panel-inline-form .form-grid { margin-bottom: 12px; }
 .panel-inline-form .calc-line { margin-bottom: 12px; }
 
+.datos-referencia {
+  display: flex; flex-wrap: wrap; gap: 5px 16px; align-items: center;
+  background: #fff; border: 1px dashed var(--border); border-radius: 8px;
+  padding: 9px 12px; font-size: 13px; color: var(--muted); margin-bottom: 12px;
+}
+.datos-referencia strong { color: var(--ink); font-weight: 700; }
+.datos-referencia .sep { color: var(--border); }
+
+.campo-simple { display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: var(--muted); font-weight: 600; margin-bottom: 12px; }
+.campo-simple input {
+  padding: 9px 10px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; color: var(--ink); font-family: inherit; font-weight: normal;
+}
+
 .filtro-chip-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .chip {
   border: 1px solid var(--border); background: #fff; padding: 6px 12px; border-radius: 999px;
