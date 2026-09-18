@@ -102,9 +102,20 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
   btn.classList.add("active");
   document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+  cerrarMenu();
   refrescarTodo();
 });
 document.getElementById("fechaTrabajo").addEventListener("change", refrescarTodo);
+
+/* Menu hamburguesa (solo se ve en pantallas chicas, ver css) */
+function cerrarMenu() {
+  document.getElementById("tabs").classList.remove("open");
+  document.getElementById("menuToggle").setAttribute("aria-expanded", "false");
+}
+document.getElementById("menuToggle").addEventListener("click", () => {
+  const abierto = document.getElementById("tabs").classList.toggle("open");
+  document.getElementById("menuToggle").setAttribute("aria-expanded", abierto ? "true" : "false");
+});
 
 /* ==========================================================================
    CAPA DE DATOS (Supabase)
