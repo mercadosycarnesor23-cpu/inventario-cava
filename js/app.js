@@ -893,8 +893,12 @@ function seleccionarProductoDespacho(productoId) {
   container.hidden = false;
 
   if (it.stockActual === null) {
+    const sugeridoSinStock = it.tieneSugerido
+      ? `<div class="datos-referencia"><span>Piden: <strong>Bello ${fmt(it.sugeridoBello, p.unidad)} · Colores ${fmt(it.sugeridoColores, p.unidad)} · Expres ${fmt(it.sugeridoExpres, p.unidad)}</strong></span></div>`
+      : "";
     container.innerHTML = `
       <div class="producto-elegido">${escapeHtml(p.codigo)} · ${escapeHtml(p.nombre)}</div>
+      ${sugeridoSinStock}
       <div class="alerta-box">Este producto no tiene inventario registrado todavía. Regístralo primero en la pestaña Inventario.</div>
       <div class="form-actions"><button type="button" class="btn-ghost" id="btnCancelarDespachoInline">Cerrar</button></div>
     `;
