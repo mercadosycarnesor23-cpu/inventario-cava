@@ -892,30 +892,23 @@ function seleccionarProductoDespacho(productoId) {
   const container = document.getElementById("formDespachoInline");
   container.hidden = false;
 
-  if (it.stockActual === null) {
-    const sugeridoSinStock = it.tieneSugerido
-      ? `<div class="datos-referencia"><span>Piden: <strong>Bello ${fmt(it.sugeridoBello, p.unidad)} · Colores ${fmt(it.sugeridoColores, p.unidad)} · Expres ${fmt(it.sugeridoExpres, p.unidad)}</strong></span></div>`
-      : "";
-    container.innerHTML = `
-      <div class="producto-elegido">${escapeHtml(p.codigo)} · ${escapeHtml(p.nombre)}</div>
-      ${sugeridoSinStock}
-      <div class="alerta-box">Este producto no tiene inventario registrado todavía. Regístralo primero en la pestaña Inventario.</div>
-      <div class="form-actions"><button type="button" class="btn-ghost" id="btnCancelarDespachoInline">Cerrar</button></div>
-    `;
-    document.getElementById("btnCancelarDespachoInline").addEventListener("click", cerrarFormDespachoInline);
-    return;
-  }
+  const sinInventario = it.stockActual === null;
+  const disponibleBase = sinInventario ? 0 : Number(it.stockActual);
 
   const step = p.unidad === "UND" ? "1" : "0.01";
   const sugerido = it.tieneSugerido
     ? `<span class="sep">·</span><span>Piden: <strong>Bello ${fmt(it.sugeridoBello, p.unidad)} · Colores ${fmt(it.sugeridoColores, p.unidad)} · Expres ${fmt(it.sugeridoExpres, p.unidad)}</strong></span>`
     : "";
+  const avisoSinInventario = sinInventario
+    ? `<div class="alerta-box">Este producto no tiene inventario registrado todavía. Puedes despacharlo igual, pero va a quedar la diferencia en negativo hasta que lo cuentes en Inventario.</div>`
+    : "";
   container.innerHTML = `
     <div class="producto-elegido">${escapeHtml(p.codigo)} · ${escapeHtml(p.nombre)}</div>
     <div class="datos-referencia">
-      <span>Disponible: <strong>${fmt(it.stockActual, p.unidad)}</strong></span>
+      <span>Disponible: <strong>${sinInventario ? "Sin registrar (0)" : fmt(it.stockActual, p.unidad)}</strong></span>
       ${sugerido}
     </div>
+    ${avisoSinInventario}
     <div class="form-grid">
       <label>Bello
         <input type="number" id="despBello" min="0" step="${step}" value="0">
@@ -927,7 +920,7 @@ function seleccionarProductoDespacho(productoId) {
         <input type="number" id="despExpres" min="0" step="${step}" value="0">
       </label>
     </div>
-    <div class="calc-line" id="calcDespacho">Despachando: <strong>0</strong> · Queda: <strong>${fmt(it.stockActual, p.unidad)}</strong></div>
+    <div class="calc-line" id="calcDespacho">Despachando: <strong>0</strong> · Queda: <strong>${fmt(disponibleBase, p.unidad)}</strong></div>
     <label class="campo-simple">Notas (opcional)
       <input type="text" id="despNotas" placeholder="Opcional">
     </label>
@@ -942,7 +935,7 @@ function seleccionarProductoDespacho(productoId) {
     const colores = Number(document.getElementById("despColores").value) || 0;
     const expres = Number(document.getElementById("despExpres").value) || 0;
     const total = bello + colores + expres;
-    const queda = Number(it.stockActual) - total;
+    const queda = disponibleBase - total;
     const el = document.getElementById("calcDespacho");
     el.innerHTML = `Despachando: <strong>${fmt(total, p.unidad)}</strong> · Queda: <strong>${fmt(queda, p.unidad)}</strong>`;
     el.classList.toggle("negativo", queda < 0);
@@ -964,8 +957,7 @@ function cerrarFormDespachoInline() {
 async function guardarDespacho(p, cuerpo) {
   if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes registrar despachos.");
   const stockRow = await fetchStockRow(p.id);
-  if (!stockRow) throw new Error("Este producto no tiene inventario registrado todavia");
-  const disponible = Number(stockRow.valor);
+  const disponible = stockRow ? Number(stockRow.valor) : 0;
   const bello = Number(cuerpo.bello) || 0;
   const colores = Number(cuerpo.colores) || 0;
   const expres = Number(cuerpo.puntosExpres) || 0;
