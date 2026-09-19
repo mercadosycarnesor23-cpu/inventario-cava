@@ -115,6 +115,9 @@ document.getElementById("modalOverlay").addEventListener("click", (e) => { if (e
    TABS
    ========================================================================== */
 
+function actualizarTabActualLabel(btn) {
+  document.getElementById("tabActualLabel").textContent = btn.textContent.trim();
+}
 document.getElementById("tabs").addEventListener("click", (e) => {
   const btn = e.target.closest(".tab-btn");
   if (!btn) return;
@@ -122,9 +125,11 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
   btn.classList.add("active");
   document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
+  actualizarTabActualLabel(btn);
   cerrarMenu();
   refrescarTodo();
 });
+actualizarTabActualLabel(document.querySelector(".tab-btn.active"));
 document.getElementById("fechaTrabajo").addEventListener("change", refrescarTodo);
 
 /* Menu hamburguesa (solo se ve en pantallas chicas, ver css) */
