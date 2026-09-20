@@ -1083,8 +1083,18 @@ async function cargarPlatano() {
 function pesoNetoPlatano(bruto, canastas) {
   return Math.max(0, (Number(bruto) || 0) - (Number(canastas) || 0) * 2.2);
 }
-function fmtKgPlatano(n) { return Number(n || 0).toLocaleString("es-CO", { maximumFractionDigits: 1 }) + " kg"; }
-function fmtCanastasPlatano(n) { return Number(n || 0).toLocaleString("es-CO", { maximumFractionDigits: 0 }) + " canastas"; }
+// El redondeo evita que sumas/restas acumuladas dejen un "-0" o un ".0000001"
+// cosmetico cuando en la practica el saldo esta exactamente en cero.
+function fmtKgPlatano(n) {
+  let v = Number(n || 0);
+  if (Math.abs(v) < 0.05) v = 0;
+  return v.toLocaleString("es-CO", { maximumFractionDigits: 1 }) + " kg";
+}
+function fmtCanastasPlatano(n) {
+  let v = Number(n || 0);
+  if (Math.abs(v) < 0.5) v = 0;
+  return v.toLocaleString("es-CO", { maximumFractionDigits: 0 }) + " canastas";
+}
 
 function platanoVerdeDisponible() {
   const sumar = (arr, campo) => arr.reduce((a, r) => a + Number(r[campo]), 0);
@@ -1121,32 +1131,23 @@ function platanoProximoLote() {
 
 function renderPlatanoResumen() {
   const verde = platanoVerdeDisponible();
-  const activos = platanoLotesActivos();
-  const coloresLote = ["kpi-gold", "kpi-blue", "kpi-green", "kpi-danger"];
-  let html = `
+  const todosLotes = platanoTodosLosLotes();
+  const maduroTotal = {
+    kg: todosLotes.reduce((a, l) => a + l.kg, 0),
+    canastas: todosLotes.reduce((a, l) => a + l.canastas, 0),
+  };
+  const html = `
     <div class="kpi-card kpi-green">
       <span class="kpi-label">Verde disponible</span>
       <span class="kpi-value">${fmtKgPlatano(verde.kg)}</span>
       <span class="kpi-label">${fmtCanastasPlatano(verde.canastas)}</span>
     </div>
+    <div class="kpi-card kpi-gold">
+      <span class="kpi-label">Maduro disponible</span>
+      <span class="kpi-value">${fmtKgPlatano(maduroTotal.kg)}</span>
+      <span class="kpi-label">${fmtCanastasPlatano(maduroTotal.canastas)}</span>
+    </div>
   `;
-  activos.forEach((l, i) => {
-    html += `
-      <div class="kpi-card ${coloresLote[i % coloresLote.length]}">
-        <span class="kpi-label">Maduro · Lote ${l.lote}</span>
-        <span class="kpi-value">${fmtKgPlatano(l.kg)}</span>
-        <span class="kpi-label">${fmtCanastasPlatano(l.canastas)}</span>
-      </div>
-    `;
-  });
-  if (activos.length === 0) {
-    html += `
-      <div class="kpi-card" style="background:#eef0f1;color:var(--muted)">
-        <span class="kpi-label">Maduro disponible</span>
-        <span class="kpi-value">0 kg</span>
-      </div>
-    `;
-  }
   document.getElementById("platanoResumenGrid").innerHTML = html;
 }
 
