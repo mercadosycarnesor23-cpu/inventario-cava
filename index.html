@@ -124,7 +124,7 @@
         <span class="hint">No se reinicia cada día: es acumulado, igual al Excel que llevabas.</span>
       </div>
       <div class="kpi-grid" id="platanoResumenGrid"></div>
-      <div class="table-wrap" style="margin-top:14px">
+      <div class="table-wrap">
         <table>
           <thead><tr><th>Lote</th><th>Kilos netos</th><th>Canastas</th></tr></thead>
           <tbody id="tablaPlatanoLotes"></tbody>
@@ -132,7 +132,7 @@
       </div>
     </div>
 
-    <div class="panel solo-editor">
+    <div class="panel solo-editor panel-platano-entrada">
       <div class="panel-title-row">
         <h3>Registrar entrada de verde</h3>
         <span class="hint">Mercancía que llega de proveedor.</span>
@@ -155,7 +155,7 @@
       </div>
     </div>
 
-    <div class="panel solo-editor">
+    <div class="panel solo-editor panel-platano-salida">
       <div class="panel-title-row">
         <h3>Registrar salida</h3>
         <span class="hint">Despacho de plátano verde o maduro a un punto.</span>
@@ -197,7 +197,7 @@
       </div>
     </div>
 
-    <div class="panel solo-editor">
+    <div class="panel solo-editor panel-platano-maduracion">
       <div class="panel-title-row">
         <h3>Pasar verde a maduración</h3>
         <span class="hint">Saca kilos del verde disponible y los pone a madurar en un lote.</span>
@@ -222,9 +222,10 @@
 
     <div class="panel solo-editor">
       <div class="panel-title-row">
-        <h3>Ajustar canastas</h3>
-        <span class="hint">Para cuando se trasvasa producto de una canasta a otra: el peso no cambia, pero el conteo de canastas sí.</span>
+        <h3>Ajustar canastas y kilos</h3>
+        <span class="hint">Trasvase de canastas, o merma/deshidrate en kilos. Puedes ajustar uno solo o los dos a la vez.</span>
       </div>
+      <div class="datos-referencia" id="platanoDeshidrateRef"></div>
       <div class="form-grid">
         <label>Ubicación
           <select id="ajUbicacion">
@@ -236,7 +237,18 @@
           <select id="ajLote"></select>
         </label>
         <label>Canastas a ajustar
-          <input type="number" id="ajCanastas" step="1" placeholder="Ej: -1 para restar, 1 para sumar">
+          <input type="number" id="ajCanastas" step="1" placeholder="Ej: -1 para restar, 1 para sumar" value="0">
+        </label>
+        <label>Kilos a ajustar
+          <input type="number" id="ajKilos" step="0.01" placeholder="Ej: -20 por merma" value="0">
+        </label>
+        <label>Concepto (para los kilos)
+          <input type="text" id="ajConcepto" list="platanoConceptos" value="Deshidrate">
+          <datalist id="platanoConceptos">
+            <option value="Deshidrate"></option>
+            <option value="Error de pesaje"></option>
+            <option value="Otro"></option>
+          </datalist>
         </label>
         <label>Nota (opcional)
           <input type="text" id="ajNota" placeholder="Ej: trasvase de canastas">
@@ -254,6 +266,16 @@
           <input type="date" id="filtroFechaPlatano">
         </label>
       </div>
+
+      <h4 class="platano-subtitulo">Despacho por destino y producto: pedido vs. despachado</h4>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Producto</th><th>Bello</th><th>Colores</th><th>Puntos Expres</th></tr></thead>
+          <tbody id="tablaPlatanoComparativo"></tbody>
+        </table>
+      </div>
+
+      <h4 class="platano-subtitulo">Todos los movimientos de la fecha</h4>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th>Bruto</th><th>Canastas</th><th>Neto</th><th></th></tr></thead>
