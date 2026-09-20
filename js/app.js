@@ -1062,17 +1062,22 @@ wireAutocomplete("buscarDespacho", "dropdownDespacho", seleccionarProductoDespac
 let platanoEntradas = [];
 let platanoMaduraciones = [];
 let platanoSalidas = [];
+let platanoAjustes = [];
+
+const PLATANO_PROVEEDORES_SUGERIDOS = ["Carvajal", "Alejandro Granados", "Zuleta", "Finca Alejandro Arias", "Flor del Plátano"];
 
 async function cargarPlatano() {
-  const [{ data: e, error: e1 }, { data: m, error: e2 }, { data: s, error: e3 }] = await Promise.all([
+  const [{ data: e, error: e1 }, { data: m, error: e2 }, { data: s, error: e3 }, { data: a, error: e4 }] = await Promise.all([
     sb.from("platano_entradas").select("*").order("fecha", { ascending: false }).order("creado_en", { ascending: false }),
     sb.from("platano_maduracion").select("*").order("fecha", { ascending: false }).order("creado_en", { ascending: false }),
     sb.from("platano_salidas").select("*").order("fecha", { ascending: false }).order("creado_en", { ascending: false }),
+    sb.from("platano_ajustes_canastas").select("*").order("fecha", { ascending: false }).order("creado_en", { ascending: false }),
   ]);
-  throwIfError(e1); throwIfError(e2); throwIfError(e3);
+  throwIfError(e1); throwIfError(e2); throwIfError(e3); throwIfError(e4);
   platanoEntradas = e || [];
   platanoMaduraciones = m || [];
   platanoSalidas = s || [];
+  platanoAjustes = a || [];
 }
 
 function pesoNetoPlatano(bruto, canastas) {
@@ -1084,9 +1089,10 @@ function fmtCanastasPlatano(n) { return Number(n || 0).toLocaleString("es-CO", {
 function platanoVerdeDisponible() {
   const sumar = (arr, campo) => arr.reduce((a, r) => a + Number(r[campo]), 0);
   const salidasVerde = platanoSalidas.filter(s => s.producto === "VERDE");
+  const ajustesVerde = platanoAjustes.filter(a => a.ubicacion === "VERDE");
   return {
     kg: sumar(platanoEntradas, "peso_neto") - sumar(salidasVerde, "peso_neto") - sumar(platanoMaduraciones, "peso_neto"),
-    canastas: sumar(platanoEntradas, "canastas") - sumar(salidasVerde, "canastas") - sumar(platanoMaduraciones, "canastas"),
+    canastas: sumar(platanoEntradas, "canastas") - sumar(salidasVerde, "canastas") - sumar(platanoMaduraciones, "canastas") + sumar(ajustesVerde, "canastas"),
   };
 }
 
@@ -1098,8 +1104,9 @@ function platanoTodosLosLotes() {
   numeros.forEach(lote => {
     const entradasLote = platanoMaduraciones.filter(m => Number(m.lote) === lote);
     const salidasLote = platanoSalidas.filter(s => s.producto === "MADURO" && Number(s.lote) === lote);
+    const ajustesLote = platanoAjustes.filter(a => a.ubicacion === "MADURO" && Number(a.lote) === lote);
     const kg = entradasLote.reduce((a, r) => a + Number(r.peso_neto), 0) - salidasLote.reduce((a, r) => a + Number(r.peso_neto), 0);
-    const canastas = entradasLote.reduce((a, r) => a + Number(r.canastas), 0) - salidasLote.reduce((a, r) => a + Number(r.canastas), 0);
+    const canastas = entradasLote.reduce((a, r) => a + Number(r.canastas), 0) - salidasLote.reduce((a, r) => a + Number(r.canastas), 0) + ajustesLote.reduce((a, r) => a + Number(r.canastas), 0);
     lista.push({ lote, kg, canastas });
   });
   return lista.sort((a, b) => a.lote - b.lote);
@@ -1143,6 +1150,19 @@ function renderPlatanoResumen() {
   document.getElementById("platanoResumenGrid").innerHTML = html;
 }
 
+// Tabla con TODOS los lotes (incluye los ya vaciados), para responder
+// "cuanto queda en cada lote" sin importar si esta activo o no.
+function renderPlatanoLotesTabla() {
+  const todos = platanoTodosLosLotes();
+  document.getElementById("tablaPlatanoLotes").innerHTML = todos.map(l => `
+    <tr>
+      <td>Lote ${l.lote}</td>
+      <td>${fmtKgPlatano(l.kg)}</td>
+      <td>${fmtCanastasPlatano(l.canastas)}</td>
+    </tr>
+  `).join("") || `<tr class="empty-row"><td colspan="3">Todavía no hay lotes de maduración.</td></tr>`;
+}
+
 function renderPlatanoFormularios() {
   const verde = platanoVerdeDisponible();
   document.getElementById("platanoVerdeRefMaduracion").innerHTML =
@@ -1165,11 +1185,24 @@ function renderPlatanoFormularios() {
   ).join("") || `<option value="">Sin lotes con saldo</option>`;
   if ([...selectorPsLote.options].some(o => o.value === valorPrevioPs)) selectorPsLote.value = valorPrevioPs;
 
-  const proveedores = [...new Set(platanoEntradas.map(e => e.proveedor).filter(Boolean))];
+  const historicos = platanoEntradas.map(e => e.proveedor).filter(Boolean);
+  const proveedores = [...new Set([...PLATANO_PROVEEDORES_SUGERIDOS, ...historicos])];
   document.getElementById("platanoProveedores").innerHTML = proveedores.map(p => `<option value="${escapeHtml(p)}"></option>`).join("");
+
+  const selectorAjLote = document.getElementById("ajLote");
+  const valorPrevioAj = selectorAjLote.value;
+  selectorAjLote.innerHTML = todos.map(l =>
+    `<option value="${l.lote}">Lote ${l.lote} (${fmtCanastasPlatano(l.canastas)})</option>`
+  ).join("") || `<option value="">Sin lotes todavía</option>`;
+  if ([...selectorAjLote.options].some(o => o.value === valorPrevioAj)) selectorAjLote.value = valorPrevioAj;
 
   actualizarRefSalidaPlatano();
 }
+
+function actualizarAjusteLoteWrap() {
+  document.getElementById("ajLoteWrap").hidden = document.getElementById("ajUbicacion").value !== "MADURO";
+}
+document.getElementById("ajUbicacion").addEventListener("change", actualizarAjusteLoteWrap);
 
 function actualizarRefSalidaPlatano() {
   const producto = document.getElementById("psProducto").value;
@@ -1205,24 +1238,30 @@ wireCalcPlatano("psBruto", "psCanastas", "calcPlatanoSalida");
 
 function renderPlatanoHistorial() {
   const items = [
-    ...platanoEntradas.map(r => ({ tipo: "Entrada verde", detalle: r.proveedor || "-", ...r })),
-    ...platanoMaduraciones.map(r => ({ tipo: "A maduración", detalle: `Lote ${r.lote}`, ...r })),
-    ...platanoSalidas.map(r => ({ tipo: "Salida " + r.producto.toLowerCase(), detalle: r.destino + (r.lote ? ` (lote ${r.lote})` : ""), ...r })),
+    ...platanoEntradas.map(r => ({ tipo: "Entrada verde", origen: "entrada", detalle: r.proveedor || "-", bruto: r.peso_bruto, canastas: r.canastas, neto: r.peso_neto, ...r })),
+    ...platanoMaduraciones.map(r => ({ tipo: "A maduración", origen: "maduracion", detalle: `Lote ${r.lote}`, bruto: r.peso_bruto, canastas: r.canastas, neto: r.peso_neto, ...r })),
+    ...platanoSalidas.map(r => ({ tipo: "Salida " + r.producto.toLowerCase(), origen: "salida", detalle: r.destino + (r.lote ? ` (lote ${r.lote})` : ""), bruto: r.peso_bruto, canastas: r.canastas, neto: r.peso_neto, ...r })),
+    ...platanoAjustes.map(r => ({
+      tipo: "Ajuste canastas", origen: "ajuste",
+      detalle: (r.ubicacion === "MADURO" ? `Lote ${r.lote}` : "Verde") + (r.nota ? ` · ${r.nota}` : ""),
+      bruto: null, canastas: r.canastas, neto: null, ...r,
+    })),
   ];
   items.sort((a, b) => (b.creado_en || "").localeCompare(a.creado_en || ""));
   const tabla = items.slice(0, 300);
-  const tablaOrigen = { "Entrada verde": "entrada", "A maduración": "maduracion" };
   document.getElementById("tablaPlatanoHistorial").innerHTML = tabla.map(it => {
-    const origen = it.tipo.startsWith("Salida") ? "salida" : tablaOrigen[it.tipo];
+    const canastasTexto = it.origen === "ajuste"
+      ? (Number(it.canastas) > 0 ? "+" : "") + fmtCanastasPlatano(it.canastas)
+      : fmtCanastasPlatano(it.canastas);
     return `
       <tr>
         <td>${it.fecha}</td>
         <td>${it.tipo}</td>
         <td>${escapeHtml(it.detalle)}</td>
-        <td>${fmtKgPlatano(it.peso_bruto)}</td>
-        <td>${fmtCanastasPlatano(it.canastas)}</td>
-        <td>${fmtKgPlatano(it.peso_neto)}</td>
-        <td><button class="btn-icon danger" data-plat-del="${origen}|${it.id}">✕</button></td>
+        <td>${it.bruto === null ? "-" : fmtKgPlatano(it.bruto)}</td>
+        <td>${canastasTexto}</td>
+        <td>${it.neto === null ? "-" : fmtKgPlatano(it.neto)}</td>
+        <td><button class="btn-icon danger" data-plat-del="${it.origen}|${it.id}">✕</button></td>
       </tr>
     `;
   }).join("") || `<tr class="empty-row"><td colspan="7">Sin movimientos de plátano todavía.</td></tr>`;
@@ -1245,16 +1284,44 @@ function renderPlatanoHistorial() {
 
 async function eliminarPlatanoMovimiento(origen, id) {
   if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes eliminar movimientos.");
-  const tabla = { entrada: "platano_entradas", maduracion: "platano_maduracion", salida: "platano_salidas" }[origen];
+  const tabla = {
+    entrada: "platano_entradas", maduracion: "platano_maduracion",
+    salida: "platano_salidas", ajuste: "platano_ajustes_canastas",
+  }[origen];
   const { error } = await sb.from(tabla).delete().eq("id", id);
   throwIfError(error);
 }
 
 function renderPlatano() {
   renderPlatanoResumen();
+  renderPlatanoLotesTabla();
   renderPlatanoFormularios();
   renderPlatanoHistorial();
 }
+
+async function guardarAjusteCanastas() {
+  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar ajustes.", true); return; }
+  const ubicacion = document.getElementById("ajUbicacion").value;
+  const lote = ubicacion === "MADURO" ? Number(document.getElementById("ajLote").value) : null;
+  const canastas = Number(document.getElementById("ajCanastas").value);
+  const nota = document.getElementById("ajNota").value.trim();
+  if (!canastas) { toast("Ingresa cuántas canastas sumar o restar (puede ser negativo)", true); return; }
+  if (ubicacion === "MADURO" && !lote) { toast("Selecciona un lote", true); return; }
+  try {
+    const { error } = await sb.from("platano_ajustes_canastas").insert({
+      fecha: todayISO(), ubicacion, lote, canastas, nota: nota || null,
+    });
+    throwIfError(error);
+    document.getElementById("ajCanastas").value = "";
+    document.getElementById("ajNota").value = "";
+    toast("Ajuste de canastas registrado");
+    await cargarPlatano();
+    renderPlatano();
+  } catch (err) {
+    toast(err.message || "No se pudo registrar el ajuste", true);
+  }
+}
+document.getElementById("btnGuardarAjusteCanastas").addEventListener("click", guardarAjusteCanastas);
 
 async function guardarPlatanoEntrada() {
   if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar entradas.", true); return; }
