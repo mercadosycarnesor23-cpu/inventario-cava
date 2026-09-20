@@ -1063,6 +1063,7 @@ let platanoEntradas = [];
 let platanoMaduraciones = [];
 let platanoSalidas = [];
 let platanoAjustes = [];
+let platanoSugeridos = [];
 
 const PLATANO_PROVEEDORES_SUGERIDOS = ["Carvajal", "Alejandro Granados", "Zuleta", "Finca Alejandro Arias", "Flor del Plátano"];
 
@@ -1078,6 +1079,18 @@ async function cargarPlatano() {
   platanoMaduraciones = m || [];
   platanoSalidas = s || [];
   platanoAjustes = a || [];
+  try {
+    // en try aparte: si todavia no existe platano_sugeridos (falta correr
+    // migration_v6.sql) no debe tumbar el resto de los datos de platano.
+    const { data: sg, error: e5 } = await sb.from("platano_sugeridos").select("*").eq("fecha", todayISO());
+    throwIfError(e5);
+    platanoSugeridos = sg || [];
+  } catch (err) {
+    platanoSugeridos = [];
+  }
+}
+function platanoSugerido(producto) {
+  return platanoSugeridos.find(s => s.producto === producto) || { bello: 0, colores: 0, puntos_expres: 0 };
 }
 
 function pesoNetoPlatano(bruto, canastas) {
@@ -1197,8 +1210,48 @@ function renderPlatanoFormularios() {
   ).join("") || `<option value="">Sin lotes todavía</option>`;
   if ([...selectorAjLote.options].some(o => o.value === valorPrevioAj)) selectorAjLote.value = valorPrevioAj;
 
+  const sugVerde = platanoSugerido("VERDE");
+  const sugMaduro = platanoSugerido("MADURO");
+  document.getElementById("sugPlatanoVerdeBello").value = sugVerde.bello;
+  document.getElementById("sugPlatanoVerdeColores").value = sugVerde.colores;
+  document.getElementById("sugPlatanoVerdeExpres").value = sugVerde.puntos_expres;
+  document.getElementById("sugPlatanoMaduroBello").value = sugMaduro.bello;
+  document.getElementById("sugPlatanoMaduroColores").value = sugMaduro.colores;
+  document.getElementById("sugPlatanoMaduroExpres").value = sugMaduro.puntos_expres;
+
   actualizarRefSalidaPlatano();
 }
+
+async function guardarSugeridoPlatano() {
+  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes guardar el sugerido.", true); return; }
+  const fecha = todayISO();
+  const registros = [
+    {
+      fecha, producto: "VERDE",
+      bello: Number(document.getElementById("sugPlatanoVerdeBello").value) || 0,
+      colores: Number(document.getElementById("sugPlatanoVerdeColores").value) || 0,
+      puntos_expres: Number(document.getElementById("sugPlatanoVerdeExpres").value) || 0,
+      actualizado_en: new Date().toISOString(),
+    },
+    {
+      fecha, producto: "MADURO",
+      bello: Number(document.getElementById("sugPlatanoMaduroBello").value) || 0,
+      colores: Number(document.getElementById("sugPlatanoMaduroColores").value) || 0,
+      puntos_expres: Number(document.getElementById("sugPlatanoMaduroExpres").value) || 0,
+      actualizado_en: new Date().toISOString(),
+    },
+  ];
+  try {
+    const { error } = await sb.from("platano_sugeridos").upsert(registros, { onConflict: "fecha,producto" });
+    throwIfError(error);
+    toast("Sugerido de plátano guardado");
+    await cargarPlatano();
+    renderPlatano();
+  } catch (err) {
+    toast(err.message || "No se pudo guardar el sugerido", true);
+  }
+}
+document.getElementById("btnGuardarSugeridoPlatano").addEventListener("click", guardarSugeridoPlatano);
 
 function actualizarAjusteLoteWrap() {
   document.getElementById("ajLoteWrap").hidden = document.getElementById("ajUbicacion").value !== "MADURO";
@@ -1209,15 +1262,20 @@ function actualizarRefSalidaPlatano() {
   const producto = document.getElementById("psProducto").value;
   document.getElementById("psLoteWrap").hidden = producto !== "MADURO";
   const ref = document.getElementById("platanoDisponibleRefSalida");
+  const sug = platanoSugerido(producto);
+  const pideAlgo = Number(sug.bello) > 0 || Number(sug.colores) > 0 || Number(sug.puntos_expres) > 0;
+  const pidenHtml = pideAlgo
+    ? `<span class="sep">·</span><span>Piden hoy: <strong>Bello ${fmtKgPlatano(sug.bello)} · Colores ${fmtKgPlatano(sug.colores)} · Expres ${fmtKgPlatano(sug.puntos_expres)}</strong></span>`
+    : "";
   if (producto === "VERDE") {
     const verde = platanoVerdeDisponible();
-    ref.innerHTML = `<span>Disponible (verde): <strong>${fmtKgPlatano(verde.kg)} · ${fmtCanastasPlatano(verde.canastas)}</strong></span>`;
+    ref.innerHTML = `<span>Disponible (verde): <strong>${fmtKgPlatano(verde.kg)} · ${fmtCanastasPlatano(verde.canastas)}</strong></span>${pidenHtml}`;
   } else {
     const lote = document.getElementById("psLote").value;
     const info = platanoTodosLosLotes().find(l => String(l.lote) === String(lote));
-    ref.innerHTML = info
+    ref.innerHTML = (info
       ? `<span>Disponible (lote ${info.lote}): <strong>${fmtKgPlatano(info.kg)} · ${fmtCanastasPlatano(info.canastas)}</strong></span>`
-      : `<span>Selecciona un lote con saldo.</span>`;
+      : `<span>Selecciona un lote con saldo.</span>`) + pidenHtml;
   }
 }
 document.getElementById("psProducto").addEventListener("change", actualizarRefSalidaPlatano);
@@ -1238,6 +1296,9 @@ wireCalcPlatano("pmBruto", "pmCanastas", "calcPlatanoMaduracion");
 wireCalcPlatano("psBruto", "psCanastas", "calcPlatanoSalida");
 
 function renderPlatanoHistorial() {
+  const filtroFecha = document.getElementById("filtroFechaPlatano").value || todayISO();
+  document.getElementById("filtroFechaPlatano").value = filtroFecha;
+
   const items = [
     ...platanoEntradas.map(r => ({ tipo: "Entrada verde", origen: "entrada", detalle: r.proveedor || "-", bruto: r.peso_bruto, canastas: r.canastas, neto: r.peso_neto, ...r })),
     ...platanoMaduraciones.map(r => ({ tipo: "A maduración", origen: "maduracion", detalle: `Lote ${r.lote}`, bruto: r.peso_bruto, canastas: r.canastas, neto: r.peso_neto, ...r })),
@@ -1247,7 +1308,7 @@ function renderPlatanoHistorial() {
       detalle: (r.ubicacion === "MADURO" ? `Lote ${r.lote}` : "Verde") + (r.nota ? ` · ${r.nota}` : ""),
       bruto: null, canastas: r.canastas, neto: null, ...r,
     })),
-  ];
+  ].filter(it => it.fecha === filtroFecha);
   items.sort((a, b) => (b.creado_en || "").localeCompare(a.creado_en || ""));
   const tabla = items.slice(0, 300);
   document.getElementById("tablaPlatanoHistorial").innerHTML = tabla.map(it => {
@@ -1265,7 +1326,7 @@ function renderPlatanoHistorial() {
         <td><button class="btn-icon danger" data-plat-del="${it.origen}|${it.id}">✕</button></td>
       </tr>
     `;
-  }).join("") || `<tr class="empty-row"><td colspan="7">Sin movimientos de plátano todavía.</td></tr>`;
+  }).join("") || `<tr class="empty-row"><td colspan="7">Sin movimientos de plátano en esa fecha.</td></tr>`;
 
   document.getElementById("tablaPlatanoHistorial").querySelectorAll("[data-plat-del]").forEach(b => {
     b.addEventListener("click", async () => {
@@ -1282,6 +1343,7 @@ function renderPlatanoHistorial() {
     });
   });
 }
+document.getElementById("filtroFechaPlatano").addEventListener("change", renderPlatanoHistorial);
 
 async function eliminarPlatanoMovimiento(origen, id) {
   if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes eliminar movimientos.");
