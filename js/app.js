@@ -1063,7 +1063,6 @@ let platanoEntradas = [];
 let platanoMaduraciones = [];
 let platanoSalidas = [];
 let platanoAjustes = [];
-let platanoSugeridos = [];
 
 const PLATANO_PROVEEDORES_SUGERIDOS = ["Carvajal", "Alejandro Granados", "Zuleta", "Finca Alejandro Arias", "Flor del Plátano"];
 
@@ -1079,18 +1078,16 @@ async function cargarPlatano() {
   platanoMaduraciones = m || [];
   platanoSalidas = s || [];
   platanoAjustes = a || [];
-  try {
-    // en try aparte: si todavia no existe platano_sugeridos (falta correr
-    // migration_v6.sql) no debe tumbar el resto de los datos de platano.
-    const { data: sg, error: e5 } = await sb.from("platano_sugeridos").select("*").eq("fecha", todayISO());
-    throwIfError(e5);
-    platanoSugeridos = sg || [];
-  } catch (err) {
-    platanoSugeridos = [];
-  }
 }
+
+// El sugerido de Platano Verde/Maduro se pega junto con el de todos los demas
+// productos en "Sugerido del dia" (pestaña Despacho) -- aqui solo se lee lo
+// que ya quedo importado para los productos "PLATANO VERDE" y "PLATANO MADURO".
 function platanoSugerido(producto) {
-  return platanoSugeridos.find(s => s.producto === producto) || { bello: 0, colores: 0, puntos_expres: 0 };
+  const nombreBuscado = producto === "MADURO" ? "PLATANO MADURO" : "PLATANO VERDE";
+  const it = estado.find(e => e.nombre && e.nombre.trim().toUpperCase() === nombreBuscado);
+  if (!it || !it.tieneSugerido) return { bello: 0, colores: 0, puntos_expres: 0 };
+  return { bello: it.sugeridoBello, colores: it.sugeridoColores, puntos_expres: it.sugeridoExpres };
 }
 
 function pesoNetoPlatano(bruto, canastas) {
@@ -1210,48 +1207,8 @@ function renderPlatanoFormularios() {
   ).join("") || `<option value="">Sin lotes todavía</option>`;
   if ([...selectorAjLote.options].some(o => o.value === valorPrevioAj)) selectorAjLote.value = valorPrevioAj;
 
-  const sugVerde = platanoSugerido("VERDE");
-  const sugMaduro = platanoSugerido("MADURO");
-  document.getElementById("sugPlatanoVerdeBello").value = sugVerde.bello;
-  document.getElementById("sugPlatanoVerdeColores").value = sugVerde.colores;
-  document.getElementById("sugPlatanoVerdeExpres").value = sugVerde.puntos_expres;
-  document.getElementById("sugPlatanoMaduroBello").value = sugMaduro.bello;
-  document.getElementById("sugPlatanoMaduroColores").value = sugMaduro.colores;
-  document.getElementById("sugPlatanoMaduroExpres").value = sugMaduro.puntos_expres;
-
   actualizarRefSalidaPlatano();
 }
-
-async function guardarSugeridoPlatano() {
-  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes guardar el sugerido.", true); return; }
-  const fecha = todayISO();
-  const registros = [
-    {
-      fecha, producto: "VERDE",
-      bello: Number(document.getElementById("sugPlatanoVerdeBello").value) || 0,
-      colores: Number(document.getElementById("sugPlatanoVerdeColores").value) || 0,
-      puntos_expres: Number(document.getElementById("sugPlatanoVerdeExpres").value) || 0,
-      actualizado_en: new Date().toISOString(),
-    },
-    {
-      fecha, producto: "MADURO",
-      bello: Number(document.getElementById("sugPlatanoMaduroBello").value) || 0,
-      colores: Number(document.getElementById("sugPlatanoMaduroColores").value) || 0,
-      puntos_expres: Number(document.getElementById("sugPlatanoMaduroExpres").value) || 0,
-      actualizado_en: new Date().toISOString(),
-    },
-  ];
-  try {
-    const { error } = await sb.from("platano_sugeridos").upsert(registros, { onConflict: "fecha,producto" });
-    throwIfError(error);
-    toast("Sugerido de plátano guardado");
-    await cargarPlatano();
-    renderPlatano();
-  } catch (err) {
-    toast(err.message || "No se pudo guardar el sugerido", true);
-  }
-}
-document.getElementById("btnGuardarSugeridoPlatano").addEventListener("click", guardarSugeridoPlatano);
 
 function actualizarAjusteLoteWrap() {
   document.getElementById("ajLoteWrap").hidden = document.getElementById("ajUbicacion").value !== "MADURO";
