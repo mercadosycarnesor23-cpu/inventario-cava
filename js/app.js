@@ -1090,6 +1090,52 @@ function platanoSugerido(producto) {
   return { bello: it.sugeridoBello, colores: it.sugeridoColores, puntos_expres: it.sugeridoExpres };
 }
 
+// Bello y Colores son destinos exactos; todo lo demas (campoamor, casafruber,
+// ewin, listas, etc.) cuenta como Puntos Expres. Desperdicio no es un destino
+// real, no entra en el comparativo de pedido vs despachado.
+function clasePlatanoDestino(destino) {
+  const d = (destino || "").trim().toLowerCase();
+  if (d === "bello") return "bello";
+  if (d === "colores") return "colores";
+  if (d === "desperdicio") return null;
+  return "expres";
+}
+
+function platanoDespachadoPorDestino(fecha) {
+  const resultado = {
+    VERDE: { bello: 0, colores: 0, expres: 0 },
+    MADURO: { bello: 0, colores: 0, expres: 0 },
+  };
+  platanoSalidas.filter(s => s.fecha === fecha).forEach(s => {
+    const clase = clasePlatanoDestino(s.destino);
+    if (!clase || !resultado[s.producto]) return;
+    resultado[s.producto][clase] += Number(s.peso_neto);
+  });
+  return resultado;
+}
+
+function renderPlatanoComparativo() {
+  const fecha = document.getElementById("filtroFechaPlatano").value || todayISO();
+  const despachado = platanoDespachadoPorDestino(fecha);
+  const filas = [
+    { etiqueta: "Verde", clave: "VERDE" },
+    { etiqueta: "Maduro", clave: "MADURO" },
+  ];
+  document.getElementById("tablaPlatanoComparativo").innerHTML = filas.map(f => {
+    const pide = platanoSugerido(f.clave);
+    const va = despachado[f.clave];
+    const celda = (pedido, hecho) => `<td>Piden ${fmtKgPlatano(pedido)} <br> Van ${fmtKgPlatano(hecho)}</td>`;
+    return `
+      <tr>
+        <td>${f.etiqueta}</td>
+        ${celda(pide.bello, va.bello)}
+        ${celda(pide.colores, va.colores)}
+        ${celda(pide.puntos_expres, va.expres)}
+      </tr>
+    `;
+  }).join("");
+}
+
 function pesoNetoPlatano(bruto, canastas) {
   return Math.max(0, (Number(bruto) || 0) - (Number(canastas) || 0) * 2.2);
 }
@@ -1111,7 +1157,7 @@ function platanoVerdeDisponible() {
   const salidasVerde = platanoSalidas.filter(s => s.producto === "VERDE");
   const ajustesVerde = platanoAjustes.filter(a => a.ubicacion === "VERDE");
   return {
-    kg: sumar(platanoEntradas, "peso_neto") - sumar(salidasVerde, "peso_neto") - sumar(platanoMaduraciones, "peso_neto"),
+    kg: sumar(platanoEntradas, "peso_neto") - sumar(salidasVerde, "peso_neto") - sumar(platanoMaduraciones, "peso_neto") + sumar(ajustesVerde, "kilos"),
     canastas: sumar(platanoEntradas, "canastas") - sumar(salidasVerde, "canastas") - sumar(platanoMaduraciones, "canastas") + sumar(ajustesVerde, "canastas"),
   };
 }
@@ -1125,11 +1171,21 @@ function platanoTodosLosLotes() {
     const entradasLote = platanoMaduraciones.filter(m => Number(m.lote) === lote);
     const salidasLote = platanoSalidas.filter(s => s.producto === "MADURO" && Number(s.lote) === lote);
     const ajustesLote = platanoAjustes.filter(a => a.ubicacion === "MADURO" && Number(a.lote) === lote);
-    const kg = entradasLote.reduce((a, r) => a + Number(r.peso_neto), 0) - salidasLote.reduce((a, r) => a + Number(r.peso_neto), 0);
+    const kg = entradasLote.reduce((a, r) => a + Number(r.peso_neto), 0) - salidasLote.reduce((a, r) => a + Number(r.peso_neto), 0) + ajustesLote.reduce((a, r) => a + Number(r.kilos), 0);
     const canastas = entradasLote.reduce((a, r) => a + Number(r.canastas), 0) - salidasLote.reduce((a, r) => a + Number(r.canastas), 0) + ajustesLote.reduce((a, r) => a + Number(r.canastas), 0);
     lista.push({ lote, kg, canastas });
   });
   return lista.sort((a, b) => a.lote - b.lote);
+}
+
+// Cuanto se ha perdido por deshidrate (todo el historico), comparado contra
+// todo lo que ha pasado por maduracion, para saber la tasa promedio de merma.
+function platanoAnalisisDeshidrate() {
+  const esDeshidrate = a => (a.concepto || "").trim().toLowerCase().includes("deshidrat");
+  const totalMermaKg = platanoAjustes.filter(esDeshidrate).reduce((s, a) => s + Math.abs(Math.min(0, Number(a.kilos))), 0);
+  const totalMaduradoKg = platanoMaduraciones.reduce((s, m) => s + Number(m.peso_neto), 0);
+  const porcentaje = totalMaduradoKg > 0 ? (totalMermaKg / totalMaduradoKg) * 100 : 0;
+  return { totalMermaKg, totalMaduradoKg, porcentaje };
 }
 function platanoLotesActivos() {
   return platanoTodosLosLotes().filter(l => l.kg > 0.01);
@@ -1203,9 +1259,14 @@ function renderPlatanoFormularios() {
   const selectorAjLote = document.getElementById("ajLote");
   const valorPrevioAj = selectorAjLote.value;
   selectorAjLote.innerHTML = todos.map(l =>
-    `<option value="${l.lote}">Lote ${l.lote} (${fmtCanastasPlatano(l.canastas)})</option>`
+    `<option value="${l.lote}">Lote ${l.lote} (${fmtKgPlatano(l.kg)} · ${fmtCanastasPlatano(l.canastas)})</option>`
   ).join("") || `<option value="">Sin lotes todavía</option>`;
   if ([...selectorAjLote.options].some(o => o.value === valorPrevioAj)) selectorAjLote.value = valorPrevioAj;
+
+  const deshidrate = platanoAnalisisDeshidrate();
+  document.getElementById("platanoDeshidrateRef").innerHTML = deshidrate.totalMaduradoKg > 0
+    ? `<span>Deshidrate acumulado: <strong>${fmtKgPlatano(deshidrate.totalMermaKg)}</strong> de ${fmtKgPlatano(deshidrate.totalMaduradoKg)} madurados</span><span class="sep">·</span><span>Promedio: <strong>${deshidrate.porcentaje.toLocaleString("es-CO", { maximumFractionDigits: 1 })}%</strong> (${(deshidrate.porcentaje * 10).toLocaleString("es-CO", { maximumFractionDigits: 1 })} kg por cada 1.000 kg)</span>`
+    : `<span>Todavía no hay suficiente historial para calcular el promedio de deshidrate.</span>`;
 
   actualizarRefSalidaPlatano();
 }
@@ -1256,22 +1317,28 @@ function renderPlatanoHistorial() {
   const filtroFecha = document.getElementById("filtroFechaPlatano").value || todayISO();
   document.getElementById("filtroFechaPlatano").value = filtroFecha;
 
+  renderPlatanoComparativo();
+
   const items = [
     ...platanoEntradas.map(r => ({ tipo: "Entrada verde", origen: "entrada", detalle: r.proveedor || "-", bruto: r.peso_bruto, canastas: r.canastas, neto: r.peso_neto, ...r })),
     ...platanoMaduraciones.map(r => ({ tipo: "A maduración", origen: "maduracion", detalle: `Lote ${r.lote}`, bruto: r.peso_bruto, canastas: r.canastas, neto: r.peso_neto, ...r })),
     ...platanoSalidas.map(r => ({ tipo: "Salida " + r.producto.toLowerCase(), origen: "salida", detalle: r.destino + (r.lote ? ` (lote ${r.lote})` : ""), bruto: r.peso_bruto, canastas: r.canastas, neto: r.peso_neto, ...r })),
     ...platanoAjustes.map(r => ({
-      tipo: "Ajuste canastas", origen: "ajuste",
+      tipo: r.kilos ? `Ajuste (${r.concepto || "kilos"})` : "Ajuste canastas", origen: "ajuste",
       detalle: (r.ubicacion === "MADURO" ? `Lote ${r.lote}` : "Verde") + (r.nota ? ` · ${r.nota}` : ""),
-      bruto: null, canastas: r.canastas, neto: null, ...r,
+      bruto: null, canastas: r.canastas, neto: r.kilos, ...r,
     })),
   ].filter(it => it.fecha === filtroFecha);
   items.sort((a, b) => (b.creado_en || "").localeCompare(a.creado_en || ""));
   const tabla = items.slice(0, 300);
   document.getElementById("tablaPlatanoHistorial").innerHTML = tabla.map(it => {
+    const conSigno = (fmtFn, valor) => (Number(valor) > 0 ? "+" : "") + fmtFn(valor);
     const canastasTexto = it.origen === "ajuste"
-      ? (Number(it.canastas) > 0 ? "+" : "") + fmtCanastasPlatano(it.canastas)
+      ? (Number(it.canastas) ? conSigno(fmtCanastasPlatano, it.canastas) : "-")
       : fmtCanastasPlatano(it.canastas);
+    const netoTexto = it.origen === "ajuste"
+      ? (it.neto ? conSigno(fmtKgPlatano, it.neto) : "-")
+      : (it.neto === null ? "-" : fmtKgPlatano(it.neto));
     return `
       <tr>
         <td>${it.fecha}</td>
@@ -1279,7 +1346,7 @@ function renderPlatanoHistorial() {
         <td>${escapeHtml(it.detalle)}</td>
         <td>${it.bruto === null ? "-" : fmtKgPlatano(it.bruto)}</td>
         <td>${canastasTexto}</td>
-        <td>${it.neto === null ? "-" : fmtKgPlatano(it.neto)}</td>
+        <td>${netoTexto}</td>
         <td><button class="btn-icon danger" data-plat-del="${it.origen}|${it.id}">✕</button></td>
       </tr>
     `;
@@ -1323,18 +1390,23 @@ async function guardarAjusteCanastas() {
   if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar ajustes.", true); return; }
   const ubicacion = document.getElementById("ajUbicacion").value;
   const lote = ubicacion === "MADURO" ? Number(document.getElementById("ajLote").value) : null;
-  const canastas = Number(document.getElementById("ajCanastas").value);
+  const canastas = Number(document.getElementById("ajCanastas").value) || 0;
+  const kilos = Number(document.getElementById("ajKilos").value) || 0;
+  const concepto = document.getElementById("ajConcepto").value.trim();
   const nota = document.getElementById("ajNota").value.trim();
-  if (!canastas) { toast("Ingresa cuántas canastas sumar o restar (puede ser negativo)", true); return; }
+  if (!canastas && !kilos) { toast("Ingresa canastas y/o kilos a ajustar (puede ser negativo)", true); return; }
+  if (kilos && !concepto) { toast("Indica el concepto de los kilos (ej. Deshidrate)", true); return; }
   if (ubicacion === "MADURO" && !lote) { toast("Selecciona un lote", true); return; }
   try {
     const { error } = await sb.from("platano_ajustes_canastas").insert({
-      fecha: todayISO(), ubicacion, lote, canastas, nota: nota || null,
+      fecha: todayISO(), ubicacion, lote, canastas, kilos,
+      concepto: kilos ? concepto : null, nota: nota || null,
     });
     throwIfError(error);
-    document.getElementById("ajCanastas").value = "";
+    document.getElementById("ajCanastas").value = "0";
+    document.getElementById("ajKilos").value = "0";
     document.getElementById("ajNota").value = "";
-    toast("Ajuste de canastas registrado");
+    toast("Ajuste registrado");
     await cargarPlatano();
     renderPlatano();
   } catch (err) {
