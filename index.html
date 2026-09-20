@@ -36,6 +36,7 @@
   <nav class="tabs" id="tabs">
     <button class="tab-btn active" data-tab="inventario">Inventario</button>
     <button class="tab-btn" data-tab="despacho">Despacho</button>
+    <button class="tab-btn" data-tab="platano">Plátano</button>
     <button class="tab-btn" data-tab="historial">Historial</button>
     <button class="tab-btn" data-tab="productos">Productos</button>
     <button class="tab-btn" data-tab="resumen">Resumen</button>
@@ -110,6 +111,115 @@
         <table>
           <thead><tr><th>Hora</th><th>Código</th><th>Producto</th><th>Bello</th><th>Colores</th><th>Puntos Expres</th><th>Diferencia</th><th></th></tr></thead>
           <tbody id="tablaDespachoHoy"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLATANO -->
+  <section class="tab-panel" id="tab-platano">
+    <div class="panel">
+      <div class="panel-title-row">
+        <h3>Saldo actual de plátano</h3>
+        <span class="hint">No se reinicia cada día: es acumulado, igual al Excel que llevabas.</span>
+      </div>
+      <div class="kpi-grid" id="platanoResumenGrid"></div>
+    </div>
+
+    <div class="panel solo-editor">
+      <div class="panel-title-row">
+        <h3>Registrar entrada de verde</h3>
+        <span class="hint">Mercancía que llega de proveedor.</span>
+      </div>
+      <div class="form-grid">
+        <label>De quién entra
+          <input type="text" id="peProveedor" list="platanoProveedores" placeholder="Ej: Atual">
+          <datalist id="platanoProveedores"></datalist>
+        </label>
+        <label>Peso bruto (kg)
+          <input type="number" id="peBruto" min="0" step="0.01">
+        </label>
+        <label>Canastas
+          <input type="number" id="peCanastas" min="0" step="1" value="0">
+        </label>
+      </div>
+      <div class="calc-line" id="calcPlatanoEntrada">Peso neto: <strong>0 kg</strong></div>
+      <div class="form-actions">
+        <button type="button" class="btn-primary" id="btnGuardarPlatanoEntrada">Registrar entrada</button>
+      </div>
+    </div>
+
+    <div class="panel solo-editor">
+      <div class="panel-title-row">
+        <h3>Pasar verde a maduración</h3>
+        <span class="hint">Saca kilos del verde disponible y los pone a madurar en un lote.</span>
+      </div>
+      <div class="datos-referencia" id="platanoVerdeRefMaduracion"></div>
+      <div class="form-grid">
+        <label>Lote
+          <select id="pmLote"></select>
+        </label>
+        <label>Peso bruto (kg)
+          <input type="number" id="pmBruto" min="0" step="0.01">
+        </label>
+        <label>Canastas
+          <input type="number" id="pmCanastas" min="0" step="1" value="0">
+        </label>
+      </div>
+      <div class="calc-line" id="calcPlatanoMaduracion">Peso neto: <strong>0 kg</strong></div>
+      <div class="form-actions">
+        <button type="button" class="btn-primary" id="btnGuardarPlatanoMaduracion">Pasar a maduración</button>
+      </div>
+    </div>
+
+    <div class="panel solo-editor">
+      <div class="panel-title-row">
+        <h3>Registrar salida</h3>
+        <span class="hint">Despacho de plátano verde o maduro a un punto.</span>
+      </div>
+      <div class="form-grid">
+        <label>Producto
+          <select id="psProducto">
+            <option value="VERDE">Verde</option>
+            <option value="MADURO">Maduro</option>
+          </select>
+        </label>
+        <label id="psLoteWrap" hidden>Lote
+          <select id="psLote"></select>
+        </label>
+        <label>A quién se despachó
+          <input type="text" id="psDestino" list="platanoDestinos" placeholder="Ej: Bello">
+          <datalist id="platanoDestinos">
+            <option value="Bello"></option>
+            <option value="Colores"></option>
+            <option value="Campo amor"></option>
+            <option value="Casa fruver"></option>
+            <option value="Edwin"></option>
+            <option value="Desperdicio"></option>
+          </datalist>
+        </label>
+      </div>
+      <div class="datos-referencia" id="platanoDisponibleRefSalida"></div>
+      <div class="form-grid">
+        <label>Peso bruto (kg)
+          <input type="number" id="psBruto" min="0" step="0.01">
+        </label>
+        <label>Canastas
+          <input type="number" id="psCanastas" min="0" step="1" value="0">
+        </label>
+      </div>
+      <div class="calc-line" id="calcPlatanoSalida">Peso neto: <strong>0 kg</strong></div>
+      <div class="form-actions">
+        <button type="button" class="btn-primary" id="btnGuardarPlatanoSalida">Registrar salida</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title-row"><h3>Historial de plátano</h3></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th>Bruto</th><th>Canastas</th><th>Neto</th><th></th></tr></thead>
+          <tbody id="tablaPlatanoHistorial"></tbody>
         </table>
       </div>
     </div>
