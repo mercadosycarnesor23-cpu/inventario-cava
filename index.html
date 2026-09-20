@@ -124,6 +124,39 @@
         <span class="hint">No se reinicia cada día: es acumulado, igual al Excel que llevabas.</span>
       </div>
       <div class="kpi-grid" id="platanoResumenGrid"></div>
+      <div class="table-wrap" style="margin-top:14px">
+        <table>
+          <thead><tr><th>Lote</th><th>Kilos netos</th><th>Canastas</th></tr></thead>
+          <tbody id="tablaPlatanoLotes"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel solo-editor">
+      <div class="panel-title-row">
+        <h3>Ajustar canastas</h3>
+        <span class="hint">Para cuando se trasvasa producto de una canasta a otra: el peso no cambia, pero el conteo de canastas sí.</span>
+      </div>
+      <div class="form-grid">
+        <label>Ubicación
+          <select id="ajUbicacion">
+            <option value="VERDE">Verde</option>
+            <option value="MADURO">Maduro (por lote)</option>
+          </select>
+        </label>
+        <label id="ajLoteWrap" hidden>Lote
+          <select id="ajLote"></select>
+        </label>
+        <label>Canastas a ajustar
+          <input type="number" id="ajCanastas" step="1" placeholder="Ej: -1 para restar, 1 para sumar">
+        </label>
+        <label>Nota (opcional)
+          <input type="text" id="ajNota" placeholder="Ej: trasvase de canastas">
+        </label>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn-primary" id="btnGuardarAjusteCanastas">Registrar ajuste</button>
+      </div>
     </div>
 
     <div class="panel solo-editor">
