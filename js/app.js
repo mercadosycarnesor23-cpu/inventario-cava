@@ -288,6 +288,13 @@ async function refrescarTodo() {
     renderInventarioHoy();
     await renderDespachoHoy();
     renderTablaProductos();
+    try {
+      await cargarPlatano();
+      renderPlatano();
+    } catch (errPlatano) {
+      // No bloquea el resto de la app si todavia no existen las tablas de platano
+      // (por ejemplo, antes de correr migration_v4.sql en Supabase).
+    }
     await renderHistorial();
     await renderDiferencias();
     await renderCorrecciones();
@@ -1046,6 +1053,310 @@ async function confirmarDespachoForzado(p, cuerpo) {
 
 wireAutocomplete("buscarInventario", "dropdownInventario", seleccionarProductoInventario);
 wireAutocomplete("buscarDespacho", "dropdownDespacho", seleccionarProductoDespacho);
+
+/* ==========================================================================
+   PLATANO (libro contable acumulado: Entradas, Maduracion, Salidas -- no se
+   reinicia cada dia, a diferencia del inventario normal)
+   ========================================================================== */
+
+let platanoEntradas = [];
+let platanoMaduraciones = [];
+let platanoSalidas = [];
+
+async function cargarPlatano() {
+  const [{ data: e, error: e1 }, { data: m, error: e2 }, { data: s, error: e3 }] = await Promise.all([
+    sb.from("platano_entradas").select("*").order("fecha", { ascending: false }).order("creado_en", { ascending: false }),
+    sb.from("platano_maduracion").select("*").order("fecha", { ascending: false }).order("creado_en", { ascending: false }),
+    sb.from("platano_salidas").select("*").order("fecha", { ascending: false }).order("creado_en", { ascending: false }),
+  ]);
+  throwIfError(e1); throwIfError(e2); throwIfError(e3);
+  platanoEntradas = e || [];
+  platanoMaduraciones = m || [];
+  platanoSalidas = s || [];
+}
+
+function pesoNetoPlatano(bruto, canastas) {
+  return Math.max(0, (Number(bruto) || 0) - (Number(canastas) || 0) * 2.2);
+}
+function fmtKgPlatano(n) { return Number(n || 0).toLocaleString("es-CO", { maximumFractionDigits: 1 }) + " kg"; }
+function fmtCanastasPlatano(n) { return Number(n || 0).toLocaleString("es-CO", { maximumFractionDigits: 0 }) + " canastas"; }
+
+function platanoVerdeDisponible() {
+  const sumar = (arr, campo) => arr.reduce((a, r) => a + Number(r[campo]), 0);
+  const salidasVerde = platanoSalidas.filter(s => s.producto === "VERDE");
+  return {
+    kg: sumar(platanoEntradas, "peso_neto") - sumar(salidasVerde, "peso_neto") - sumar(platanoMaduraciones, "peso_neto"),
+    canastas: sumar(platanoEntradas, "canastas") - sumar(salidasVerde, "canastas") - sumar(platanoMaduraciones, "canastas"),
+  };
+}
+
+// Todos los lotes que alguna vez existieron, con su saldo actual (puede ser 0
+// si ya se vendio por completo -- igual se puede volver a usar ese numero).
+function platanoTodosLosLotes() {
+  const numeros = new Set(platanoMaduraciones.map(m => Number(m.lote)));
+  const lista = [];
+  numeros.forEach(lote => {
+    const entradasLote = platanoMaduraciones.filter(m => Number(m.lote) === lote);
+    const salidasLote = platanoSalidas.filter(s => s.producto === "MADURO" && Number(s.lote) === lote);
+    const kg = entradasLote.reduce((a, r) => a + Number(r.peso_neto), 0) - salidasLote.reduce((a, r) => a + Number(r.peso_neto), 0);
+    const canastas = entradasLote.reduce((a, r) => a + Number(r.canastas), 0) - salidasLote.reduce((a, r) => a + Number(r.canastas), 0);
+    lista.push({ lote, kg, canastas });
+  });
+  return lista.sort((a, b) => a.lote - b.lote);
+}
+function platanoLotesActivos() {
+  return platanoTodosLosLotes().filter(l => l.kg > 0.01);
+}
+function platanoProximoLote() {
+  const todos = platanoTodosLosLotes();
+  return todos.length ? Math.max(...todos.map(l => l.lote)) + 1 : 1;
+}
+
+function renderPlatanoResumen() {
+  const verde = platanoVerdeDisponible();
+  const activos = platanoLotesActivos();
+  const coloresLote = ["kpi-gold", "kpi-blue", "kpi-green", "kpi-danger"];
+  let html = `
+    <div class="kpi-card kpi-green">
+      <span class="kpi-label">Verde disponible</span>
+      <span class="kpi-value">${fmtKgPlatano(verde.kg)}</span>
+      <span class="kpi-label">${fmtCanastasPlatano(verde.canastas)}</span>
+    </div>
+  `;
+  activos.forEach((l, i) => {
+    html += `
+      <div class="kpi-card ${coloresLote[i % coloresLote.length]}">
+        <span class="kpi-label">Maduro · Lote ${l.lote}</span>
+        <span class="kpi-value">${fmtKgPlatano(l.kg)}</span>
+        <span class="kpi-label">${fmtCanastasPlatano(l.canastas)}</span>
+      </div>
+    `;
+  });
+  if (activos.length === 0) {
+    html += `
+      <div class="kpi-card" style="background:#eef0f1;color:var(--muted)">
+        <span class="kpi-label">Maduro disponible</span>
+        <span class="kpi-value">0 kg</span>
+      </div>
+    `;
+  }
+  document.getElementById("platanoResumenGrid").innerHTML = html;
+}
+
+function renderPlatanoFormularios() {
+  const verde = platanoVerdeDisponible();
+  document.getElementById("platanoVerdeRefMaduracion").innerHTML =
+    `<span>Verde disponible: <strong>${fmtKgPlatano(verde.kg)} · ${fmtCanastasPlatano(verde.canastas)}</strong></span>`;
+
+  const todos = platanoTodosLosLotes();
+  const proximo = platanoProximoLote();
+  const selectorPmLote = document.getElementById("pmLote");
+  const valorPrevioPm = selectorPmLote.value;
+  selectorPmLote.innerHTML = todos.map(l =>
+    `<option value="${l.lote}">Lote ${l.lote} (${fmtKgPlatano(l.kg)}${l.kg <= 0.01 ? " · vacío" : ""})</option>`
+  ).join("") + `<option value="nuevo">+ Nuevo lote (${proximo})</option>`;
+  if ([...selectorPmLote.options].some(o => o.value === valorPrevioPm)) selectorPmLote.value = valorPrevioPm;
+
+  const activos = platanoLotesActivos();
+  const selectorPsLote = document.getElementById("psLote");
+  const valorPrevioPs = selectorPsLote.value;
+  selectorPsLote.innerHTML = activos.map(l =>
+    `<option value="${l.lote}">Lote ${l.lote} (${fmtKgPlatano(l.kg)})</option>`
+  ).join("") || `<option value="">Sin lotes con saldo</option>`;
+  if ([...selectorPsLote.options].some(o => o.value === valorPrevioPs)) selectorPsLote.value = valorPrevioPs;
+
+  const proveedores = [...new Set(platanoEntradas.map(e => e.proveedor).filter(Boolean))];
+  document.getElementById("platanoProveedores").innerHTML = proveedores.map(p => `<option value="${escapeHtml(p)}"></option>`).join("");
+
+  actualizarRefSalidaPlatano();
+}
+
+function actualizarRefSalidaPlatano() {
+  const producto = document.getElementById("psProducto").value;
+  document.getElementById("psLoteWrap").hidden = producto !== "MADURO";
+  const ref = document.getElementById("platanoDisponibleRefSalida");
+  if (producto === "VERDE") {
+    const verde = platanoVerdeDisponible();
+    ref.innerHTML = `<span>Disponible (verde): <strong>${fmtKgPlatano(verde.kg)} · ${fmtCanastasPlatano(verde.canastas)}</strong></span>`;
+  } else {
+    const lote = document.getElementById("psLote").value;
+    const info = platanoTodosLosLotes().find(l => String(l.lote) === String(lote));
+    ref.innerHTML = info
+      ? `<span>Disponible (lote ${info.lote}): <strong>${fmtKgPlatano(info.kg)} · ${fmtCanastasPlatano(info.canastas)}</strong></span>`
+      : `<span>Selecciona un lote con saldo.</span>`;
+  }
+}
+document.getElementById("psProducto").addEventListener("change", actualizarRefSalidaPlatano);
+document.getElementById("psLote").addEventListener("change", actualizarRefSalidaPlatano);
+
+function wireCalcPlatano(idBruto, idCanastas, idCalc) {
+  const recalc = () => {
+    const bruto = Number(document.getElementById(idBruto).value) || 0;
+    const canastas = Number(document.getElementById(idCanastas).value) || 0;
+    const neto = pesoNetoPlatano(bruto, canastas);
+    document.getElementById(idCalc).innerHTML = `Peso neto: <strong>${fmtKgPlatano(neto)}</strong>`;
+  };
+  document.getElementById(idBruto).addEventListener("input", recalc);
+  document.getElementById(idCanastas).addEventListener("input", recalc);
+}
+wireCalcPlatano("peBruto", "peCanastas", "calcPlatanoEntrada");
+wireCalcPlatano("pmBruto", "pmCanastas", "calcPlatanoMaduracion");
+wireCalcPlatano("psBruto", "psCanastas", "calcPlatanoSalida");
+
+function renderPlatanoHistorial() {
+  const items = [
+    ...platanoEntradas.map(r => ({ tipo: "Entrada verde", detalle: r.proveedor || "-", ...r })),
+    ...platanoMaduraciones.map(r => ({ tipo: "A maduración", detalle: `Lote ${r.lote}`, ...r })),
+    ...platanoSalidas.map(r => ({ tipo: "Salida " + r.producto.toLowerCase(), detalle: r.destino + (r.lote ? ` (lote ${r.lote})` : ""), ...r })),
+  ];
+  items.sort((a, b) => (b.creado_en || "").localeCompare(a.creado_en || ""));
+  const tabla = items.slice(0, 300);
+  const tablaOrigen = { "Entrada verde": "entrada", "A maduración": "maduracion" };
+  document.getElementById("tablaPlatanoHistorial").innerHTML = tabla.map(it => {
+    const origen = it.tipo.startsWith("Salida") ? "salida" : tablaOrigen[it.tipo];
+    return `
+      <tr>
+        <td>${it.fecha}</td>
+        <td>${it.tipo}</td>
+        <td>${escapeHtml(it.detalle)}</td>
+        <td>${fmtKgPlatano(it.peso_bruto)}</td>
+        <td>${fmtCanastasPlatano(it.canastas)}</td>
+        <td>${fmtKgPlatano(it.peso_neto)}</td>
+        <td><button class="btn-icon danger" data-plat-del="${origen}|${it.id}">✕</button></td>
+      </tr>
+    `;
+  }).join("") || `<tr class="empty-row"><td colspan="7">Sin movimientos de plátano todavía.</td></tr>`;
+
+  document.getElementById("tablaPlatanoHistorial").querySelectorAll("[data-plat-del]").forEach(b => {
+    b.addEventListener("click", async () => {
+      const [origen, id] = b.dataset.platDel.split("|");
+      if (!confirm("¿Eliminar este movimiento de plátano?")) return;
+      try {
+        await eliminarPlatanoMovimiento(origen, id);
+        toast("Movimiento eliminado");
+        await cargarPlatano();
+        renderPlatano();
+      } catch (err) {
+        toast(err.message || "No se pudo eliminar", true);
+      }
+    });
+  });
+}
+
+async function eliminarPlatanoMovimiento(origen, id) {
+  if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes eliminar movimientos.");
+  const tabla = { entrada: "platano_entradas", maduracion: "platano_maduracion", salida: "platano_salidas" }[origen];
+  const { error } = await sb.from(tabla).delete().eq("id", id);
+  throwIfError(error);
+}
+
+function renderPlatano() {
+  renderPlatanoResumen();
+  renderPlatanoFormularios();
+  renderPlatanoHistorial();
+}
+
+async function guardarPlatanoEntrada() {
+  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar entradas.", true); return; }
+  const proveedor = document.getElementById("peProveedor").value.trim();
+  const bruto = Number(document.getElementById("peBruto").value) || 0;
+  const canastas = Number(document.getElementById("peCanastas").value) || 0;
+  if (bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
+  const neto = pesoNetoPlatano(bruto, canastas);
+  try {
+    const { error } = await sb.from("platano_entradas").insert({
+      fecha: todayISO(), proveedor: proveedor || null, peso_bruto: bruto, canastas, peso_neto: neto,
+    });
+    throwIfError(error);
+    document.getElementById("peProveedor").value = "";
+    document.getElementById("peBruto").value = "";
+    document.getElementById("peCanastas").value = "0";
+    toast("Entrada de verde registrada");
+    await cargarPlatano();
+    renderPlatano();
+  } catch (err) {
+    toast(err.message || "No se pudo registrar la entrada", true);
+  }
+}
+document.getElementById("btnGuardarPlatanoEntrada").addEventListener("click", guardarPlatanoEntrada);
+
+async function guardarPlatanoMaduracion(forzar) {
+  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar maduración.", true); return; }
+  const selectorLote = document.getElementById("pmLote");
+  const lote = selectorLote.value === "nuevo" ? platanoProximoLote() : Number(selectorLote.value);
+  const bruto = Number(document.getElementById("pmBruto").value) || 0;
+  const canastas = Number(document.getElementById("pmCanastas").value) || 0;
+  if (bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
+  const neto = pesoNetoPlatano(bruto, canastas);
+  const verde = platanoVerdeDisponible();
+  if (neto > verde.kg && !forzar) {
+    abrirModal("Vas a pasar más verde del disponible", `
+      <div class="alerta-box">
+        Verde disponible: <strong>${fmtKgPlatano(verde.kg)}</strong> ·
+        Vas a pasar a maduración: <strong>${fmtKgPlatano(neto)}</strong><br>
+        ¿Continuar de todas formas? El verde quedará en negativo.
+      </div>
+    `, { textoConfirmar: "Sí, continuar", onConfirm: () => { cerrarModal(); guardarPlatanoMaduracion(true); } });
+    return;
+  }
+  try {
+    const { error } = await sb.from("platano_maduracion").insert({
+      fecha: todayISO(), lote, peso_bruto: bruto, canastas, peso_neto: neto,
+    });
+    throwIfError(error);
+    document.getElementById("pmBruto").value = "";
+    document.getElementById("pmCanastas").value = "0";
+    toast(`Pasado a maduración en el lote ${lote}`);
+    await cargarPlatano();
+    renderPlatano();
+  } catch (err) {
+    toast(err.message || "No se pudo registrar la maduración", true);
+  }
+}
+document.getElementById("btnGuardarPlatanoMaduracion").addEventListener("click", () => guardarPlatanoMaduracion(false));
+
+async function guardarPlatanoSalida(forzar) {
+  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar salidas.", true); return; }
+  const producto = document.getElementById("psProducto").value;
+  const destino = document.getElementById("psDestino").value.trim();
+  const lote = producto === "MADURO" ? Number(document.getElementById("psLote").value) : null;
+  const bruto = Number(document.getElementById("psBruto").value) || 0;
+  const canastas = Number(document.getElementById("psCanastas").value) || 0;
+  if (!destino) { toast("Indica a quién se despachó", true); return; }
+  if (bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
+  if (producto === "MADURO" && !lote) { toast("Selecciona un lote", true); return; }
+  const neto = pesoNetoPlatano(bruto, canastas);
+
+  const disponible = producto === "VERDE"
+    ? platanoVerdeDisponible().kg
+    : (platanoTodosLosLotes().find(l => l.lote === lote) || { kg: 0 }).kg;
+
+  if (neto > disponible && !forzar) {
+    abrirModal("Estás despachando de más", `
+      <div class="alerta-box">
+        Disponible: <strong>${fmtKgPlatano(disponible)}</strong> ·
+        Vas a despachar: <strong>${fmtKgPlatano(neto)}</strong><br>
+        ¿Continuar de todas formas? Quedará registrado con saldo negativo.
+      </div>
+    `, { textoConfirmar: "Sí, despachar igual", onConfirm: () => { cerrarModal(); guardarPlatanoSalida(true); } });
+    return;
+  }
+  try {
+    const { error } = await sb.from("platano_salidas").insert({
+      fecha: todayISO(), destino, producto, lote, peso_bruto: bruto, canastas, peso_neto: neto,
+    });
+    throwIfError(error);
+    document.getElementById("psDestino").value = "";
+    document.getElementById("psBruto").value = "";
+    document.getElementById("psCanastas").value = "0";
+    toast("Salida registrada");
+    await cargarPlatano();
+    renderPlatano();
+  } catch (err) {
+    toast(err.message || "No se pudo registrar la salida", true);
+  }
+}
+document.getElementById("btnGuardarPlatanoSalida").addEventListener("click", () => guardarPlatanoSalida(false));
 
 /* ==========================================================================
    HISTORIAL
