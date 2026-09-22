@@ -1232,8 +1232,11 @@ function renderPlatanoResumen() {
     </div>
   `;
   document.getElementById("platanoResumenGrid").innerHTML = html;
-  document.getElementById("platanoMiniVerde").textContent = fmtKgPlatano(verde.kg);
-  document.getElementById("platanoMiniMaduro").textContent = fmtKgPlatano(maduroTotal.kg);
+  document.getElementById("platanoMiniVerde").textContent = `${fmtKgPlatano(verde.kg)} · ${fmtCanastasPlatano(verde.canastas)}`;
+  document.getElementById("platanoMiniMaduro").textContent = `${fmtKgPlatano(maduroTotal.kg)} · ${fmtCanastasPlatano(maduroTotal.canastas)}`;
+  document.getElementById("platanoMiniLotes").innerHTML = platanoLotesActivos().map(l =>
+    `<span>Lote ${l.lote}: ${fmtKgPlatano(l.kg)} · ${fmtCanastasPlatano(l.canastas)}</span>`
+  ).join("");
 }
 
 // Tabla con TODOS los lotes (incluye los ya vaciados), para responder
