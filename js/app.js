@@ -1280,6 +1280,10 @@ function actualizarRefSalidaPlatano() {
   const producto = document.getElementById("psProducto").value;
   document.getElementById("psLoteWrap").hidden = producto !== "MADURO";
   const ref = document.getElementById("platanoDisponibleRefSalida");
+  if (!producto) {
+    ref.innerHTML = `<span>Selecciona verde o maduro para ver el disponible.</span>`;
+    return;
+  }
   const sug = platanoSugerido(producto);
   const pideAlgo = Number(sug.bello) > 0 || Number(sug.colores) > 0 || Number(sug.puntos_expres) > 0;
   const pidenHtml = pideAlgo
@@ -1418,18 +1422,22 @@ document.getElementById("btnGuardarAjusteCanastas").addEventListener("click", gu
 async function guardarPlatanoEntrada() {
   if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar entradas.", true); return; }
   const proveedor = document.getElementById("peProveedor").value.trim();
-  const bruto = Number(document.getElementById("peBruto").value) || 0;
-  const canastas = Number(document.getElementById("peCanastas").value) || 0;
-  if (bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
+  const brutoInput = document.getElementById("peBruto").value;
+  const canastasInput = document.getElementById("peCanastas").value;
+  const bruto = Number(brutoInput) || 0;
+  const canastas = Number(canastasInput) || 0;
+  if (!proveedor) { toast("Indica de quién entra la mercancía", true); return; }
+  if (!brutoInput || bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
+  if (!canastasInput || canastas <= 0) { toast("Ingresa las canastas", true); return; }
   const neto = pesoNetoPlatano(bruto, canastas);
   try {
     const { error } = await sb.from("platano_entradas").insert({
-      fecha: todayISO(), proveedor: proveedor || null, peso_bruto: bruto, canastas, peso_neto: neto,
+      fecha: todayISO(), proveedor, peso_bruto: bruto, canastas, peso_neto: neto,
     });
     throwIfError(error);
     document.getElementById("peProveedor").value = "";
     document.getElementById("peBruto").value = "";
-    document.getElementById("peCanastas").value = "0";
+    document.getElementById("peCanastas").value = "";
     toast("Entrada de verde registrada");
     await cargarPlatano();
     renderPlatano();
@@ -1443,9 +1451,12 @@ async function guardarPlatanoMaduracion(forzar) {
   if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar maduración.", true); return; }
   const selectorLote = document.getElementById("pmLote");
   const lote = selectorLote.value === "nuevo" ? platanoProximoLote() : Number(selectorLote.value);
-  const bruto = Number(document.getElementById("pmBruto").value) || 0;
-  const canastas = Number(document.getElementById("pmCanastas").value) || 0;
-  if (bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
+  const brutoInput = document.getElementById("pmBruto").value;
+  const canastasInput = document.getElementById("pmCanastas").value;
+  const bruto = Number(brutoInput) || 0;
+  const canastas = Number(canastasInput) || 0;
+  if (!brutoInput || bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
+  if (!canastasInput || canastas <= 0) { toast("Ingresa las canastas", true); return; }
   const neto = pesoNetoPlatano(bruto, canastas);
   const verde = platanoVerdeDisponible();
   if (neto > verde.kg && !forzar) {
@@ -1464,7 +1475,7 @@ async function guardarPlatanoMaduracion(forzar) {
     });
     throwIfError(error);
     document.getElementById("pmBruto").value = "";
-    document.getElementById("pmCanastas").value = "0";
+    document.getElementById("pmCanastas").value = "";
     toast(`Pasado a maduración en el lote ${lote}`);
     await cargarPlatano();
     renderPlatano();
@@ -1479,10 +1490,14 @@ async function guardarPlatanoSalida(forzar) {
   const producto = document.getElementById("psProducto").value;
   const destino = document.getElementById("psDestino").value.trim();
   const lote = producto === "MADURO" ? Number(document.getElementById("psLote").value) : null;
-  const bruto = Number(document.getElementById("psBruto").value) || 0;
-  const canastas = Number(document.getElementById("psCanastas").value) || 0;
+  const brutoInput = document.getElementById("psBruto").value;
+  const canastasInput = document.getElementById("psCanastas").value;
+  const bruto = Number(brutoInput) || 0;
+  const canastas = Number(canastasInput) || 0;
+  if (!producto) { toast("Selecciona si es verde o maduro", true); return; }
   if (!destino) { toast("Indica a quién se despachó", true); return; }
-  if (bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
+  if (!brutoInput || bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
+  if (!canastasInput || canastas <= 0) { toast("Ingresa las canastas", true); return; }
   if (producto === "MADURO" && !lote) { toast("Selecciona un lote", true); return; }
   const neto = pesoNetoPlatano(bruto, canastas);
 
@@ -1505,9 +1520,10 @@ async function guardarPlatanoSalida(forzar) {
       fecha: todayISO(), destino, producto, lote, peso_bruto: bruto, canastas, peso_neto: neto,
     });
     throwIfError(error);
+    document.getElementById("psProducto").value = "";
     document.getElementById("psDestino").value = "";
     document.getElementById("psBruto").value = "";
-    document.getElementById("psCanastas").value = "0";
+    document.getElementById("psCanastas").value = "";
     toast("Salida registrada");
     await cargarPlatano();
     renderPlatano();
