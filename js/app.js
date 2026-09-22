@@ -1259,7 +1259,7 @@ function renderPlatanoFormularios() {
   const selectorPmLote = document.getElementById("pmLote");
   const valorPrevioPm = selectorPmLote.value;
   selectorPmLote.innerHTML = `<option value="" selected disabled>Selecciona…</option>` + todos.map(l =>
-    `<option value="${l.lote}">Lote ${l.lote} (${fmtKgPlatano(l.kg)}${l.kg <= 0.01 ? " · vacío" : ""})</option>`
+    `<option value="${l.lote}">Lote ${l.lote} (${fmtKgPlatano(l.kg)} · ${fmtCanastasPlatano(l.canastas)}${l.kg <= 0.01 ? " · vacío" : ""})</option>`
   ).join("") + `<option value="nuevo">+ Nuevo lote (${proximo})</option>`;
   if (valorPrevioPm && [...selectorPmLote.options].some(o => o.value === valorPrevioPm)) selectorPmLote.value = valorPrevioPm;
 
@@ -1267,7 +1267,7 @@ function renderPlatanoFormularios() {
   const selectorPsLote = document.getElementById("psLote");
   const valorPrevioPs = selectorPsLote.value;
   selectorPsLote.innerHTML = activos.map(l =>
-    `<option value="${l.lote}">Lote ${l.lote} (${fmtKgPlatano(l.kg)})</option>`
+    `<option value="${l.lote}">Lote ${l.lote} (${fmtKgPlatano(l.kg)} · ${fmtCanastasPlatano(l.canastas)})</option>`
   ).join("") || `<option value="">Sin lotes con saldo</option>`;
   if ([...selectorPsLote.options].some(o => o.value === valorPrevioPs)) selectorPsLote.value = valorPrevioPs;
 
