@@ -297,3 +297,27 @@ body.rol-ver .btn-icon { display: none !important; }
   .topbar-actions { order: 4; width: 100%; justify-content: space-between; margin-left: 0; }
   .split-row { grid-template-columns: 1fr; }
 }
+
+/* ---------- Hojas de impresion del sugerido ---------- */
+#areaImprimirSugerido { display: none; }
+.hoja-imprimir {
+  padding: 18px;
+  font-family: var(--font-body);
+  color: #000;
+}
+.hoja-imprimir h2 { font-family: var(--font-display); margin: 0 0 2px; }
+.hoja-imprimir .hoja-sub { color: #333; font-size: 13px; margin-bottom: 14px; }
+.hoja-imprimir table { width: 100%; border-collapse: collapse; }
+.hoja-imprimir th, .hoja-imprimir td {
+  border: 1px solid #999; padding: 6px 8px; font-size: 13.5px; text-align: left;
+}
+.hoja-imprimir th { background: #eee; }
+.hoja-imprimir td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.hoja-imprimir tfoot td { font-weight: 700; background: #f5f5f5; }
+
+@media print {
+  body > *:not(#areaImprimirSugerido) { display: none !important; }
+  #areaImprimirSugerido { display: block; }
+  .hoja-imprimir { page-break-after: always; }
+  .hoja-imprimir:last-child { page-break-after: auto; }
+}
