@@ -860,6 +860,105 @@ document.getElementById("btnImportarSugerido").addEventListener("click", async (
   }
 });
 
+/* ---------- Hojas de impresion del sugerido (mallas y varios grupos de
+   productos que un companero necesita ver impresos en papel) ---------- */
+
+function normalizarNombreSugerido(s) {
+  return String(s || "").trim().toUpperCase().normalize("NFD").replace(/[̀-ͯ]/g, "");
+}
+
+// Lee el texto pegado en el textarea de sugerido tal cual (sin exigir que el
+// codigo exista en el catalogo), porque algunas filas de la hoja solo traen
+// nombre y no codigo, y para imprimir igual se necesitan.
+function parsearFilasSugeridoParaImprimir(texto) {
+  const parseNum = (v) => {
+    const n = Number(String(v ?? "").replace(/,/g, "").trim());
+    return isNaN(n) ? 0 : n;
+  };
+  const filas = texto.split(/\r?\n/).map(l => l.split("\t"));
+  const resultado = [];
+  for (const cols of filas) {
+    const codigo = String(cols[0] ?? "").trim();
+    const nombre = String(cols[1] ?? "").trim();
+    if (!codigo && !nombre) continue;
+    const bello = parseNum(cols[3]);
+    const colores = parseNum(cols[4]);
+    let expres = 0;
+    for (let i = 5; i <= 12; i++) expres += parseNum(cols[i]);
+    if (bello === 0 && colores === 0 && expres === 0) continue;
+    resultado.push({ codigo, nombre, bello, colores, expres });
+  }
+  return resultado;
+}
+
+const HOJAS_SUGERIDO_IMPRIMIR = [
+  {
+    titulo: "Mallas y ofertas",
+    codigos: ["308", "302", "13241", "13095", "83", "13215", "13106", "287", "291", "13248", "13295", "311", "312"],
+    nombres: [
+      "Oferta Guayaba paquete *2000", "Oferta Tómate aliño malla", "Oferta Cebolla huevo malla",
+      "Oferta Pepino malla", "Oferta Tómate árbol malla", "Oferta Aguacate malla", "Oferta Mango malla",
+      "Oferta Papayuela paquete", "Oferta Maracuya malla", "Oferta Limon mandarino malla",
+      "Oferta Limón taity malla", "Oferta Papa criolla malla", "Oferta Durazno bandeja malla",
+      "Oferta Ciruela bandeja malla",
+    ].map(normalizarNombreSugerido),
+  },
+  {
+    titulo: "Zanahoria, papa, remolacha, arveja, frijol y habichuela",
+    codigos: ["424", "405", "306", "309", "367", "53", "159", "177"],
+    nombres: [],
+  },
+  {
+    titulo: "Repollo, lechuga, apio, brócoli, coliflor, cebolla puerro y espinaca",
+    codigos: ["368", "369", "197", "76", "39", "40", "70", "121", "93", "149"],
+    nombres: [],
+  },
+];
+
+function filtrarFilasParaHoja(filas, hoja) {
+  const codigosSet = new Set(hoja.codigos);
+  return filas.filter(f => {
+    if (f.codigo && codigosSet.has(f.codigo)) return true;
+    if (!f.codigo && hoja.nombres.includes(normalizarNombreSugerido(f.nombre))) return true;
+    return false;
+  });
+}
+
+function renderHojaImprimirSugerido(hoja, filas, fecha) {
+  const total = (campo) => filas.reduce((a, f) => a + Number(f[campo]), 0);
+  const filasHtml = filas.map(f => `
+    <tr>
+      <td>${escapeHtml(f.nombre || f.codigo)}</td>
+      <td class="num">${f.bello || "-"}</td>
+      <td class="num">${f.colores || "-"}</td>
+      <td class="num">${f.expres || "-"}</td>
+    </tr>
+  `).join("") || `<tr><td colspan="4">Sin pedido para este grupo en lo pegado.</td></tr>`;
+  return `
+    <div class="hoja-imprimir">
+      <h2>${escapeHtml(hoja.titulo)}</h2>
+      <div class="hoja-sub">Mercados y Carnes OR · Sugerido del ${fecha}</div>
+      <table>
+        <thead><tr><th>Producto</th><th>Bello</th><th>Colores</th><th>Puntos Expres</th></tr></thead>
+        <tbody>${filasHtml}</tbody>
+        <tfoot><tr><td>Total</td><td class="num">${total("bello")}</td><td class="num">${total("colores")}</td><td class="num">${total("expres")}</td></tr></tfoot>
+      </table>
+    </div>
+  `;
+}
+
+document.getElementById("btnImprimirSugerido").addEventListener("click", () => {
+  const texto = document.getElementById("sugeridoTexto").value;
+  if (!texto.trim()) { toast("Pega primero los datos copiados de la hoja (antes de importar, porque Importar borra el cuadro)", true); return; }
+  const filas = parsearFilasSugeridoParaImprimir(texto);
+  const fecha = fechaExcel(fechaTrabajo());
+  const html = HOJAS_SUGERIDO_IMPRIMIR
+    .map(hoja => renderHojaImprimirSugerido(hoja, filtrarFilasParaHoja(filas, hoja), fecha))
+    .join("");
+  document.getElementById("areaImprimirSugerido").innerHTML = html;
+  window.print();
+});
+
 /* ==========================================================================
    DESPACHO
    ========================================================================== */
