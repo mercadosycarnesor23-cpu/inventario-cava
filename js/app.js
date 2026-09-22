@@ -128,9 +128,26 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   actualizarTabActualLabel(btn);
   cerrarMenu();
   refrescarTodo();
+  actualizarBarraScroll();
 });
 actualizarTabActualLabel(document.querySelector(".tab-btn.active"));
 document.getElementById("fechaTrabajo").addEventListener("change", refrescarTodo);
+
+/* Al desplazar: oculta el header para ganar espacio, y en la pestaña de
+   Plátano muestra una barrita fija arriba con el saldo actual (verde/maduro)
+   para no perderlo de vista mientras se navega el formulario. */
+let ultimoScrollY = window.scrollY;
+function actualizarBarraScroll() {
+  const y = window.scrollY;
+  const header = document.querySelector(".topbar");
+  const bajando = y > ultimoScrollY && y > 60;
+  header.classList.toggle("header-oculto", bajando);
+  ultimoScrollY = y;
+
+  const enPlatano = document.getElementById("tab-platano").classList.contains("active");
+  document.getElementById("platanoMiniBar").hidden = !(enPlatano && y > 160);
+}
+window.addEventListener("scroll", actualizarBarraScroll, { passive: true });
 
 /* Menu hamburguesa (solo se ve en pantallas chicas, ver css) */
 function cerrarMenu() {
@@ -1215,6 +1232,8 @@ function renderPlatanoResumen() {
     </div>
   `;
   document.getElementById("platanoResumenGrid").innerHTML = html;
+  document.getElementById("platanoMiniVerde").textContent = fmtKgPlatano(verde.kg);
+  document.getElementById("platanoMiniMaduro").textContent = fmtKgPlatano(maduroTotal.kg);
 }
 
 // Tabla con TODOS los lotes (incluye los ya vaciados), para responder
@@ -1239,10 +1258,10 @@ function renderPlatanoFormularios() {
   const proximo = platanoProximoLote();
   const selectorPmLote = document.getElementById("pmLote");
   const valorPrevioPm = selectorPmLote.value;
-  selectorPmLote.innerHTML = todos.map(l =>
+  selectorPmLote.innerHTML = `<option value="" selected disabled>Selecciona…</option>` + todos.map(l =>
     `<option value="${l.lote}">Lote ${l.lote} (${fmtKgPlatano(l.kg)}${l.kg <= 0.01 ? " · vacío" : ""})</option>`
   ).join("") + `<option value="nuevo">+ Nuevo lote (${proximo})</option>`;
-  if ([...selectorPmLote.options].some(o => o.value === valorPrevioPm)) selectorPmLote.value = valorPrevioPm;
+  if (valorPrevioPm && [...selectorPmLote.options].some(o => o.value === valorPrevioPm)) selectorPmLote.value = valorPrevioPm;
 
   const activos = platanoLotesActivos();
   const selectorPsLote = document.getElementById("psLote");
@@ -1450,6 +1469,7 @@ document.getElementById("btnGuardarPlatanoEntrada").addEventListener("click", gu
 async function guardarPlatanoMaduracion(forzar) {
   if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar maduración.", true); return; }
   const selectorLote = document.getElementById("pmLote");
+  if (!selectorLote.value) { toast("Selecciona un lote", true); return; }
   const lote = selectorLote.value === "nuevo" ? platanoProximoLote() : Number(selectorLote.value);
   const brutoInput = document.getElementById("pmBruto").value;
   const canastasInput = document.getElementById("pmCanastas").value;
@@ -1474,6 +1494,7 @@ async function guardarPlatanoMaduracion(forzar) {
       fecha: todayISO(), lote, peso_bruto: bruto, canastas, peso_neto: neto,
     });
     throwIfError(error);
+    selectorLote.value = "";
     document.getElementById("pmBruto").value = "";
     document.getElementById("pmCanastas").value = "";
     toast(`Pasado a maduración en el lote ${lote}`);
