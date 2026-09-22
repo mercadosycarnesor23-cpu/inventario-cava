@@ -904,12 +904,12 @@ const HOJAS_SUGERIDO_IMPRIMIR = [
     ].map(normalizarNombreSugerido),
   },
   {
-    titulo: "Zanahoria, papa, remolacha, arveja, frijol y habichuela",
+    titulo: "Legumbre",
     codigos: ["424", "405", "306", "309", "367", "53", "159", "177"],
     nombres: [],
   },
   {
-    titulo: "Repollo, lechuga, apio, brócoli, coliflor, cebolla puerro y espinaca",
+    titulo: "Ramas",
     codigos: ["368", "369", "197", "76", "39", "40", "70", "121", "93", "149"],
     nombres: [],
   },
