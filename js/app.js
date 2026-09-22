@@ -1207,6 +1207,28 @@ function platanoAnalisisDeshidrate() {
 function platanoLotesActivos() {
   return platanoTodosLosLotes().filter(l => l.kg > 0.01);
 }
+
+// Kilos brutos por canasta, calculado sobre todo el historico (entradas +
+// maduracion + salidas), para poder avisar si un dato nuevo se ve inusual
+// comparado con lo que normalmente da una canasta de platano.
+const PLATANO_UMBRAL_INUSUAL = 0.20; // 20% de diferencia contra el promedio historico
+function platanoFactorHistorico() {
+  const ratios = [...platanoEntradas, ...platanoMaduraciones, ...platanoSalidas]
+    .filter(r => Number(r.canastas) > 0 && Number(r.peso_bruto) > 0)
+    .map(r => Number(r.peso_bruto) / Number(r.canastas));
+  if (ratios.length < 5) return null;
+  const media = ratios.reduce((a, b) => a + b, 0) / ratios.length;
+  return { media, n: ratios.length };
+}
+function platanoRatioInusual(bruto, canastas) {
+  if (!bruto || !canastas) return null;
+  const factor = platanoFactorHistorico();
+  if (!factor) return null;
+  const ratio = bruto / canastas;
+  const desviacion = (ratio - factor.media) / factor.media;
+  if (Math.abs(desviacion) < PLATANO_UMBRAL_INUSUAL) return null;
+  return { ratio, media: factor.media, desviacionPct: desviacion * 100 };
+}
 function platanoProximoLote() {
   const todos = platanoTodosLosLotes();
   return todos.length ? Math.max(...todos.map(l => l.lote)) + 1 : 1;
@@ -1696,7 +1718,7 @@ async function guardarAjusteCanastas() {
 }
 document.getElementById("btnGuardarAjusteCanastas").addEventListener("click", guardarAjusteCanastas);
 
-async function guardarPlatanoEntrada() {
+async function guardarPlatanoEntrada(forzar) {
   if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar entradas.", true); return; }
   const proveedor = document.getElementById("peProveedor").value.trim();
   const brutoInput = document.getElementById("peBruto").value;
@@ -1706,6 +1728,16 @@ async function guardarPlatanoEntrada() {
   if (!proveedor) { toast("Indica de quién entra la mercancía", true); return; }
   if (!brutoInput || bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
   if (!canastasInput || canastas <= 0) { toast("Ingresa las canastas", true); return; }
+  const inusual = platanoRatioInusual(bruto, canastas);
+  if (inusual && !forzar) {
+    abrirModal("Este dato se ve inusual", `
+      <div class="alerta-box">
+        Este ingreso da <strong>${inusual.ratio.toFixed(1)} kg por canasta</strong>, y lo usual según el histórico es cerca de <strong>${inusual.media.toFixed(1)} kg por canasta</strong> (${inusual.desviacionPct > 0 ? "+" : ""}${inusual.desviacionPct.toFixed(0)}%).<br>
+        Revisa que el peso bruto y las canastas estén bien digitados.<br>¿Guardar de todas formas?
+      </div>
+    `, { textoConfirmar: "Sí, guardar igual", onConfirm: () => { cerrarModal(); guardarPlatanoEntrada(true); } });
+    return;
+  }
   const neto = pesoNetoPlatano(bruto, canastas);
   try {
     const { error } = await sb.from("platano_entradas").insert({
@@ -1722,9 +1754,9 @@ async function guardarPlatanoEntrada() {
     toast(err.message || "No se pudo registrar la entrada", true);
   }
 }
-document.getElementById("btnGuardarPlatanoEntrada").addEventListener("click", guardarPlatanoEntrada);
+document.getElementById("btnGuardarPlatanoEntrada").addEventListener("click", () => guardarPlatanoEntrada(false));
 
-async function guardarPlatanoMaduracion(forzar) {
+async function guardarPlatanoMaduracion(forzarRatio, forzarDisponible) {
   if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar maduración.", true); return; }
   const selectorLote = document.getElementById("pmLote");
   if (!selectorLote.value) { toast("Selecciona un lote", true); return; }
@@ -1735,16 +1767,26 @@ async function guardarPlatanoMaduracion(forzar) {
   const canastas = Number(canastasInput) || 0;
   if (!brutoInput || bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
   if (!canastasInput || canastas <= 0) { toast("Ingresa las canastas", true); return; }
+  const inusual = platanoRatioInusual(bruto, canastas);
+  if (inusual && !forzarRatio) {
+    abrirModal("Este dato se ve inusual", `
+      <div class="alerta-box">
+        Este ingreso da <strong>${inusual.ratio.toFixed(1)} kg por canasta</strong>, y lo usual según el histórico es cerca de <strong>${inusual.media.toFixed(1)} kg por canasta</strong> (${inusual.desviacionPct > 0 ? "+" : ""}${inusual.desviacionPct.toFixed(0)}%).<br>
+        Revisa que el peso bruto y las canastas estén bien digitados.<br>¿Guardar de todas formas?
+      </div>
+    `, { textoConfirmar: "Sí, guardar igual", onConfirm: () => { cerrarModal(); guardarPlatanoMaduracion(true, forzarDisponible); } });
+    return;
+  }
   const neto = pesoNetoPlatano(bruto, canastas);
   const verde = platanoVerdeDisponible();
-  if (neto > verde.kg && !forzar) {
+  if (neto > verde.kg && !forzarDisponible) {
     abrirModal("Vas a pasar más verde del disponible", `
       <div class="alerta-box">
         Verde disponible: <strong>${fmtKgPlatano(verde.kg)}</strong> ·
         Vas a pasar a maduración: <strong>${fmtKgPlatano(neto)}</strong><br>
         ¿Continuar de todas formas? El verde quedará en negativo.
       </div>
-    `, { textoConfirmar: "Sí, continuar", onConfirm: () => { cerrarModal(); guardarPlatanoMaduracion(true); } });
+    `, { textoConfirmar: "Sí, continuar", onConfirm: () => { cerrarModal(); guardarPlatanoMaduracion(forzarRatio, true); } });
     return;
   }
   try {
@@ -1762,9 +1804,9 @@ async function guardarPlatanoMaduracion(forzar) {
     toast(err.message || "No se pudo registrar la maduración", true);
   }
 }
-document.getElementById("btnGuardarPlatanoMaduracion").addEventListener("click", () => guardarPlatanoMaduracion(false));
+document.getElementById("btnGuardarPlatanoMaduracion").addEventListener("click", () => guardarPlatanoMaduracion(false, false));
 
-async function guardarPlatanoSalida(forzar) {
+async function guardarPlatanoSalida(forzarRatio, forzarDisponible) {
   if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar salidas.", true); return; }
   const producto = document.getElementById("psProducto").value;
   const destino = document.getElementById("psDestino").value.trim();
@@ -1778,20 +1820,30 @@ async function guardarPlatanoSalida(forzar) {
   if (!brutoInput || bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
   if (!canastasInput || canastas <= 0) { toast("Ingresa las canastas", true); return; }
   if (producto === "MADURO" && !lote) { toast("Selecciona un lote", true); return; }
+  const inusual = platanoRatioInusual(bruto, canastas);
+  if (inusual && !forzarRatio) {
+    abrirModal("Este dato se ve inusual", `
+      <div class="alerta-box">
+        Este ingreso da <strong>${inusual.ratio.toFixed(1)} kg por canasta</strong>, y lo usual según el histórico es cerca de <strong>${inusual.media.toFixed(1)} kg por canasta</strong> (${inusual.desviacionPct > 0 ? "+" : ""}${inusual.desviacionPct.toFixed(0)}%).<br>
+        Revisa que el peso bruto y las canastas estén bien digitados.<br>¿Guardar de todas formas?
+      </div>
+    `, { textoConfirmar: "Sí, guardar igual", onConfirm: () => { cerrarModal(); guardarPlatanoSalida(true, forzarDisponible); } });
+    return;
+  }
   const neto = pesoNetoPlatano(bruto, canastas);
 
   const disponible = producto === "VERDE"
     ? platanoVerdeDisponible().kg
     : (platanoTodosLosLotes().find(l => l.lote === lote) || { kg: 0 }).kg;
 
-  if (neto > disponible && !forzar) {
+  if (neto > disponible && !forzarDisponible) {
     abrirModal("Estás despachando de más", `
       <div class="alerta-box">
         Disponible: <strong>${fmtKgPlatano(disponible)}</strong> ·
         Vas a despachar: <strong>${fmtKgPlatano(neto)}</strong><br>
         ¿Continuar de todas formas? Quedará registrado con saldo negativo.
       </div>
-    `, { textoConfirmar: "Sí, despachar igual", onConfirm: () => { cerrarModal(); guardarPlatanoSalida(true); } });
+    `, { textoConfirmar: "Sí, despachar igual", onConfirm: () => { cerrarModal(); guardarPlatanoSalida(forzarRatio, true); } });
     return;
   }
   try {
@@ -1810,7 +1862,7 @@ async function guardarPlatanoSalida(forzar) {
     toast(err.message || "No se pudo registrar la salida", true);
   }
 }
-document.getElementById("btnGuardarPlatanoSalida").addEventListener("click", () => guardarPlatanoSalida(false));
+document.getElementById("btnGuardarPlatanoSalida").addEventListener("click", () => guardarPlatanoSalida(false, false));
 
 /* ==========================================================================
    HISTORIAL
