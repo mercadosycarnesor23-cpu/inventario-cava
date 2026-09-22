@@ -924,7 +924,7 @@ function filtrarFilasParaHoja(filas, hoja) {
   });
 }
 
-function renderHojaImprimirSugerido(hoja, filas, fecha) {
+function renderHojaImprimirSugerido(hoja, filas, fecha, saltoPagina) {
   const total = (campo) => filas.reduce((a, f) => a + Number(f[campo]), 0);
   const totalLinea = (f) => Number(f.bello) + Number(f.colores) + Number(f.expres);
   const totalGeneral = filas.reduce((a, f) => a + totalLinea(f), 0);
@@ -938,7 +938,7 @@ function renderHojaImprimirSugerido(hoja, filas, fecha) {
     </tr>
   `).join("") || `<tr><td colspan="5">Sin pedido para este grupo en lo pegado.</td></tr>`;
   return `
-    <div class="hoja-imprimir">
+    <div class="hoja-imprimir${saltoPagina ? " hoja-salto-pagina" : ""}">
       <h2>${escapeHtml(hoja.titulo)}</h2>
       <div class="hoja-sub">Mercados y Carnes OR · Sugerido del ${fecha}</div>
       <table>
@@ -956,7 +956,7 @@ document.getElementById("btnImprimirSugerido").addEventListener("click", () => {
   const filas = parsearFilasSugeridoParaImprimir(texto);
   const fecha = fechaExcel(fechaTrabajo());
   const html = HOJAS_SUGERIDO_IMPRIMIR
-    .map(hoja => renderHojaImprimirSugerido(hoja, filtrarFilasParaHoja(filas, hoja), fecha))
+    .map((hoja, i) => renderHojaImprimirSugerido(hoja, filtrarFilasParaHoja(filas, hoja), fecha, i === 0))
     .join("");
   document.getElementById("areaImprimirSugerido").innerHTML = html;
   window.print();
