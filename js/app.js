@@ -1211,7 +1211,7 @@ function platanoLotesActivos() {
 // Kilos brutos por canasta, calculado sobre todo el historico (entradas +
 // maduracion + salidas), para poder avisar si un dato nuevo se ve inusual
 // comparado con lo que normalmente da una canasta de platano.
-const PLATANO_UMBRAL_INUSUAL = 0.20; // 20% de diferencia contra el promedio historico
+const PLATANO_UMBRAL_INUSUAL = 0.10; // 10% de diferencia contra el promedio historico
 function platanoFactorHistorico() {
   const ratios = [...platanoEntradas, ...platanoMaduraciones, ...platanoSalidas]
     .filter(r => Number(r.canastas) > 0 && Number(r.peso_bruto) > 0)
