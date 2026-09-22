@@ -318,6 +318,5 @@ body.rol-ver .btn-icon { display: none !important; }
 @media print {
   body > *:not(#areaImprimirSugerido) { display: none !important; }
   #areaImprimirSugerido { display: block; }
-  .hoja-imprimir { page-break-after: always; }
-  .hoja-imprimir:last-child { page-break-after: auto; }
+  .hoja-imprimir.hoja-salto-pagina { page-break-after: always; }
 }
