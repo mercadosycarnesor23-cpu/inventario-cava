@@ -926,22 +926,25 @@ function filtrarFilasParaHoja(filas, hoja) {
 
 function renderHojaImprimirSugerido(hoja, filas, fecha) {
   const total = (campo) => filas.reduce((a, f) => a + Number(f[campo]), 0);
+  const totalLinea = (f) => Number(f.bello) + Number(f.colores) + Number(f.expres);
+  const totalGeneral = filas.reduce((a, f) => a + totalLinea(f), 0);
   const filasHtml = filas.map(f => `
     <tr>
       <td>${escapeHtml(f.nombre || f.codigo)}</td>
       <td class="num">${f.bello || "-"}</td>
       <td class="num">${f.colores || "-"}</td>
       <td class="num">${f.expres || "-"}</td>
+      <td class="num">${totalLinea(f)}</td>
     </tr>
-  `).join("") || `<tr><td colspan="4">Sin pedido para este grupo en lo pegado.</td></tr>`;
+  `).join("") || `<tr><td colspan="5">Sin pedido para este grupo en lo pegado.</td></tr>`;
   return `
     <div class="hoja-imprimir">
       <h2>${escapeHtml(hoja.titulo)}</h2>
       <div class="hoja-sub">Mercados y Carnes OR · Sugerido del ${fecha}</div>
       <table>
-        <thead><tr><th>Producto</th><th>Bello</th><th>Colores</th><th>Puntos Expres</th></tr></thead>
+        <thead><tr><th>Producto</th><th>Bello</th><th>Colores</th><th>Puntos Expres</th><th>Total</th></tr></thead>
         <tbody>${filasHtml}</tbody>
-        <tfoot><tr><td>Total</td><td class="num">${total("bello")}</td><td class="num">${total("colores")}</td><td class="num">${total("expres")}</td></tr></tfoot>
+        <tfoot><tr><td>Total</td><td class="num">${total("bello")}</td><td class="num">${total("colores")}</td><td class="num">${total("expres")}</td><td class="num">${totalGeneral}</td></tr></tfoot>
       </table>
     </div>
   `;
