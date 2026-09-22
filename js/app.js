@@ -1373,36 +1373,291 @@ function renderPlatanoHistorial() {
         <td>${it.bruto === null ? "-" : fmtKgPlatano(it.bruto)}</td>
         <td>${canastasTexto}</td>
         <td>${netoTexto}</td>
-        <td><button class="btn-icon danger" data-plat-del="${it.origen}|${it.id}">✕</button></td>
+        <td>
+          <button class="btn-icon" data-plat-edit="${it.origen}|${it.id}">✎</button>
+          <button class="btn-icon danger" data-plat-del="${it.origen}|${it.id}">✕</button>
+        </td>
       </tr>
     `;
   }).join("") || `<tr class="empty-row"><td colspan="7">Sin movimientos de plátano en esa fecha.</td></tr>`;
 
+  document.getElementById("tablaPlatanoHistorial").querySelectorAll("[data-plat-edit]").forEach(b => {
+    b.addEventListener("click", () => {
+      const [origen, id] = b.dataset.platEdit.split("|");
+      abrirEditarPlatanoMovimiento(origen, id);
+    });
+  });
   document.getElementById("tablaPlatanoHistorial").querySelectorAll("[data-plat-del]").forEach(b => {
-    b.addEventListener("click", async () => {
+    b.addEventListener("click", () => {
       const [origen, id] = b.dataset.platDel.split("|");
-      if (!confirm("¿Eliminar este movimiento de plátano?")) return;
+      abrirEliminarPlatanoConMotivo(origen, id);
+    });
+  });
+}
+document.getElementById("filtroFechaPlatano").addEventListener("change", renderPlatanoHistorial);
+
+function buscarPlatanoRegistro(origen, id) {
+  const arr = {
+    entrada: platanoEntradas, maduracion: platanoMaduraciones,
+    salida: platanoSalidas, ajuste: platanoAjustes,
+  }[origen];
+  return arr.find(r => String(r.id) === String(id));
+}
+
+async function eliminarPlatanoMovimiento(origen, id, justificacion, registro) {
+  if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes eliminar movimientos.");
+  const tabla = {
+    entrada: "platano_entradas", maduracion: "platano_maduracion",
+    salida: "platano_salidas", ajuste: "platano_ajustes_canastas",
+  }[origen];
+  const { error: errAud } = await sb.from("platano_auditoria").insert({
+    tabla, movimiento_id: id, accion: "eliminar", justificacion,
+    detalle: JSON.stringify(registro || {}), fecha_movimiento: registro ? registro.fecha : null,
+  });
+  throwIfError(errAud);
+  const { error } = await sb.from(tabla).delete().eq("id", id);
+  throwIfError(error);
+}
+
+function abrirEliminarPlatanoConMotivo(origen, id) {
+  const registro = buscarPlatanoRegistro(origen, id);
+  abrirModal("Eliminar movimiento de plátano", `
+    <div class="modal-body-grid">
+      <div class="alerta-box">Esta acción no se puede deshacer.</div>
+      <label>Motivo de la eliminación (obligatorio)
+        <textarea id="emDelMotivo" rows="2" placeholder="Ej: Se registró por error, duplicado"></textarea>
+      </label>
+    </div>
+  `, {
+    textoConfirmar: "Eliminar",
+    onConfirm: async () => {
+      const motivo = document.getElementById("emDelMotivo").value.trim();
+      if (!motivo) { toast("Escribe el motivo de la eliminación", true); return; }
       try {
-        await eliminarPlatanoMovimiento(origen, id);
+        await eliminarPlatanoMovimiento(origen, id, motivo, registro);
+        cerrarModal();
         toast("Movimiento eliminado");
         await cargarPlatano();
         renderPlatano();
       } catch (err) {
         toast(err.message || "No se pudo eliminar", true);
       }
-    });
+    },
   });
 }
-document.getElementById("filtroFechaPlatano").addEventListener("change", renderPlatanoHistorial);
 
-async function eliminarPlatanoMovimiento(origen, id) {
-  if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes eliminar movimientos.");
+async function editarPlatanoMovimiento(origen, id, cambios, justificacion, registroAnterior) {
+  if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes editar movimientos.");
   const tabla = {
     entrada: "platano_entradas", maduracion: "platano_maduracion",
     salida: "platano_salidas", ajuste: "platano_ajustes_canastas",
   }[origen];
-  const { error } = await sb.from(tabla).delete().eq("id", id);
+  const { error } = await sb.from(tabla).update(cambios).eq("id", id);
   throwIfError(error);
+  const { error: errAud } = await sb.from("platano_auditoria").insert({
+    tabla, movimiento_id: id, accion: "editar", justificacion,
+    detalle: `Antes: ${JSON.stringify(registroAnterior)} · Después: ${JSON.stringify(cambios)}`,
+    fecha_movimiento: cambios.fecha || registroAnterior.fecha,
+  });
+  throwIfError(errAud);
+}
+
+function abrirEditarPlatanoMovimiento(origen, id) {
+  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes editar movimientos.", true); return; }
+  const r = buscarPlatanoRegistro(origen, id);
+  if (!r) { toast("No se encontró el movimiento", true); return; }
+
+  const motivoHtml = `
+    <label>Motivo de la edición (obligatorio)
+      <textarea id="emMotivo" rows="2" placeholder="Ej: El peso bruto estaba mal digitado"></textarea>
+    </label>`;
+
+  if (origen === "entrada") {
+    abrirModal("Editar entrada de verde", `
+      <div class="modal-body-grid">
+        <label>Fecha
+          <input type="date" id="emFecha" value="${r.fecha}">
+        </label>
+        <label>De quién entra
+          <input type="text" id="emProveedor" value="${escapeHtml(r.proveedor || "")}">
+        </label>
+        <label>Peso bruto (kg)
+          <input type="number" id="emBruto" min="0" step="0.01" value="${r.peso_bruto}">
+        </label>
+        <label>Canastas
+          <input type="number" id="emCanastas" min="0" step="1" value="${r.canastas}">
+        </label>
+        ${motivoHtml}
+      </div>
+    `, { onConfirm: () => {
+      const fecha = document.getElementById("emFecha").value;
+      const proveedor = document.getElementById("emProveedor").value.trim();
+      const bruto = Number(document.getElementById("emBruto").value) || 0;
+      const canastas = Number(document.getElementById("emCanastas").value) || 0;
+      const motivo = document.getElementById("emMotivo").value.trim();
+      if (!fecha) { toast("Selecciona la fecha", true); return; }
+      if (!proveedor) { toast("Indica de quién entra la mercancía", true); return; }
+      if (bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
+      if (canastas <= 0) { toast("Ingresa las canastas", true); return; }
+      if (!motivo) { toast("Escribe el motivo de la edición", true); return; }
+      guardarEdicionPlatano(origen, id, {
+        fecha, proveedor, peso_bruto: bruto, canastas, peso_neto: pesoNetoPlatano(bruto, canastas),
+      }, motivo, r);
+    } });
+    return;
+  }
+
+  if (origen === "maduracion") {
+    abrirModal("Editar paso a maduración", `
+      <div class="modal-body-grid">
+        <label>Fecha
+          <input type="date" id="emFecha" value="${r.fecha}">
+        </label>
+        <label>Lote
+          <input type="number" id="emLote" min="1" step="1" value="${r.lote}">
+        </label>
+        <label>Peso bruto (kg)
+          <input type="number" id="emBruto" min="0" step="0.01" value="${r.peso_bruto}">
+        </label>
+        <label>Canastas
+          <input type="number" id="emCanastas" min="0" step="1" value="${r.canastas}">
+        </label>
+        ${motivoHtml}
+      </div>
+    `, { onConfirm: () => {
+      const fecha = document.getElementById("emFecha").value;
+      const lote = Number(document.getElementById("emLote").value) || 0;
+      const bruto = Number(document.getElementById("emBruto").value) || 0;
+      const canastas = Number(document.getElementById("emCanastas").value) || 0;
+      const motivo = document.getElementById("emMotivo").value.trim();
+      if (!fecha) { toast("Selecciona la fecha", true); return; }
+      if (lote <= 0) { toast("Indica el lote", true); return; }
+      if (bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
+      if (canastas <= 0) { toast("Ingresa las canastas", true); return; }
+      if (!motivo) { toast("Escribe el motivo de la edición", true); return; }
+      guardarEdicionPlatano(origen, id, {
+        fecha, lote, peso_bruto: bruto, canastas, peso_neto: pesoNetoPlatano(bruto, canastas),
+      }, motivo, r);
+    } });
+    return;
+  }
+
+  if (origen === "salida") {
+    abrirModal("Editar salida", `
+      <div class="modal-body-grid">
+        <label>Fecha
+          <input type="date" id="emFecha" value="${r.fecha}">
+        </label>
+        <label>Producto
+          <select id="emProducto">
+            <option value="VERDE">Verde</option>
+            <option value="MADURO">Maduro</option>
+          </select>
+        </label>
+        <label id="emLoteWrap">Lote
+          <input type="number" id="emLote" min="1" step="1" value="${r.lote || ""}">
+        </label>
+        <label>A quién se despachó
+          <input type="text" id="emDestino" value="${escapeHtml(r.destino || "")}">
+        </label>
+        <label>Peso bruto (kg)
+          <input type="number" id="emBruto" min="0" step="0.01" value="${r.peso_bruto}">
+        </label>
+        <label>Canastas
+          <input type="number" id="emCanastas" min="0" step="1" value="${r.canastas}">
+        </label>
+        ${motivoHtml}
+      </div>
+    `, { onConfirm: () => {
+      const fecha = document.getElementById("emFecha").value;
+      const producto = document.getElementById("emProducto").value;
+      const lote = producto === "MADURO" ? (Number(document.getElementById("emLote").value) || 0) : null;
+      const destino = document.getElementById("emDestino").value.trim();
+      const bruto = Number(document.getElementById("emBruto").value) || 0;
+      const canastas = Number(document.getElementById("emCanastas").value) || 0;
+      const motivo = document.getElementById("emMotivo").value.trim();
+      if (!fecha) { toast("Selecciona la fecha", true); return; }
+      if (!destino) { toast("Indica a quién se despachó", true); return; }
+      if (bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
+      if (canastas <= 0) { toast("Ingresa las canastas", true); return; }
+      if (producto === "MADURO" && !lote) { toast("Indica el lote", true); return; }
+      if (!motivo) { toast("Escribe el motivo de la edición", true); return; }
+      guardarEdicionPlatano(origen, id, {
+        fecha, producto, lote, destino, peso_bruto: bruto, canastas, peso_neto: pesoNetoPlatano(bruto, canastas),
+      }, motivo, r);
+    } });
+    document.getElementById("emProducto").value = r.producto;
+    const actualizarLoteWrap = () => { document.getElementById("emLoteWrap").hidden = document.getElementById("emProducto").value !== "MADURO"; };
+    document.getElementById("emProducto").addEventListener("change", actualizarLoteWrap);
+    actualizarLoteWrap();
+    return;
+  }
+
+  if (origen === "ajuste") {
+    abrirModal("Editar ajuste de canastas y kilos", `
+      <div class="modal-body-grid">
+        <label>Fecha
+          <input type="date" id="emFecha" value="${r.fecha}">
+        </label>
+        <label>Ubicación
+          <select id="emUbicacion">
+            <option value="VERDE">Verde</option>
+            <option value="MADURO">Maduro (por lote)</option>
+          </select>
+        </label>
+        <label id="emLoteWrap">Lote
+          <input type="number" id="emLote" min="1" step="1" value="${r.lote || ""}">
+        </label>
+        <label>Canastas a ajustar
+          <input type="number" id="emCanastas" step="1" value="${r.canastas}">
+        </label>
+        <label>Kilos a ajustar
+          <input type="number" id="emKilos" step="0.01" value="${r.kilos}">
+        </label>
+        <label>Concepto (para los kilos)
+          <input type="text" id="emConcepto" value="${escapeHtml(r.concepto || "")}">
+        </label>
+        <label>Nota (opcional)
+          <input type="text" id="emNota" value="${escapeHtml(r.nota || "")}">
+        </label>
+        ${motivoHtml}
+      </div>
+    `, { onConfirm: () => {
+      const fecha = document.getElementById("emFecha").value;
+      const ubicacion = document.getElementById("emUbicacion").value;
+      const lote = ubicacion === "MADURO" ? (Number(document.getElementById("emLote").value) || 0) : null;
+      const canastas = Number(document.getElementById("emCanastas").value) || 0;
+      const kilos = Number(document.getElementById("emKilos").value) || 0;
+      const concepto = document.getElementById("emConcepto").value.trim();
+      const nota = document.getElementById("emNota").value.trim();
+      const motivo = document.getElementById("emMotivo").value.trim();
+      if (!fecha) { toast("Selecciona la fecha", true); return; }
+      if (!canastas && !kilos) { toast("Ingresa canastas y/o kilos a ajustar", true); return; }
+      if (kilos && !concepto) { toast("Indica el concepto de los kilos", true); return; }
+      if (ubicacion === "MADURO" && !lote) { toast("Indica el lote", true); return; }
+      if (!motivo) { toast("Escribe el motivo de la edición", true); return; }
+      guardarEdicionPlatano(origen, id, {
+        fecha, ubicacion, lote, canastas, kilos, concepto: kilos ? concepto : null, nota: nota || null,
+      }, motivo, r);
+    } });
+    document.getElementById("emUbicacion").value = r.ubicacion;
+    const actualizarLoteWrap = () => { document.getElementById("emLoteWrap").hidden = document.getElementById("emUbicacion").value !== "MADURO"; };
+    document.getElementById("emUbicacion").addEventListener("change", actualizarLoteWrap);
+    actualizarLoteWrap();
+    return;
+  }
+}
+
+async function guardarEdicionPlatano(origen, id, cambios, motivo, registroAnterior) {
+  try {
+    await editarPlatanoMovimiento(origen, id, cambios, motivo, registroAnterior);
+    cerrarModal();
+    toast("Movimiento editado");
+    await cargarPlatano();
+    renderPlatano();
+  } catch (err) {
+    toast(err.message || "No se pudo editar", true);
+  }
 }
 
 function renderPlatano() {
@@ -1425,7 +1680,7 @@ async function guardarAjusteCanastas() {
   if (ubicacion === "MADURO" && !lote) { toast("Selecciona un lote", true); return; }
   try {
     const { error } = await sb.from("platano_ajustes_canastas").insert({
-      fecha: todayISO(), ubicacion, lote, canastas, kilos,
+      fecha: fechaTrabajo(), ubicacion, lote, canastas, kilos,
       concepto: kilos ? concepto : null, nota: nota || null,
     });
     throwIfError(error);
@@ -1454,7 +1709,7 @@ async function guardarPlatanoEntrada() {
   const neto = pesoNetoPlatano(bruto, canastas);
   try {
     const { error } = await sb.from("platano_entradas").insert({
-      fecha: todayISO(), proveedor, peso_bruto: bruto, canastas, peso_neto: neto,
+      fecha: fechaTrabajo(), proveedor, peso_bruto: bruto, canastas, peso_neto: neto,
     });
     throwIfError(error);
     document.getElementById("peProveedor").value = "";
@@ -1494,7 +1749,7 @@ async function guardarPlatanoMaduracion(forzar) {
   }
   try {
     const { error } = await sb.from("platano_maduracion").insert({
-      fecha: todayISO(), lote, peso_bruto: bruto, canastas, peso_neto: neto,
+      fecha: fechaTrabajo(), lote, peso_bruto: bruto, canastas, peso_neto: neto,
     });
     throwIfError(error);
     selectorLote.value = "";
@@ -1541,7 +1796,7 @@ async function guardarPlatanoSalida(forzar) {
   }
   try {
     const { error } = await sb.from("platano_salidas").insert({
-      fecha: todayISO(), destino, producto, lote, peso_bruto: bruto, canastas, peso_neto: neto,
+      fecha: fechaTrabajo(), destino, producto, lote, peso_bruto: bruto, canastas, peso_neto: neto,
     });
     throwIfError(error);
     document.getElementById("psProducto").value = "";
