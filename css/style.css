@@ -52,11 +52,13 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 22px;
-  padding: 9px 16px;
+  gap: 16px;
+  row-gap: 2px;
+  flex-wrap: wrap;
+  padding: 7px 16px;
   background: var(--azul);
   color: #fff;
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 600;
   box-shadow: 0 2px 10px rgba(0,20,60,.18);
 }
@@ -64,6 +66,16 @@ body {
 .platano-mini-item strong { font-weight: 800; }
 .platano-mini-item.verde strong { color: var(--verde-claro); }
 .platano-mini-item.maduro strong { color: var(--amarillo-claro); }
+.platano-mini-lotes {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding-left: 12px;
+  border-left: 1px solid rgba(255,255,255,.3);
+  font-weight: 500;
+  opacity: .9;
+}
+.platano-mini-lotes:empty { display: none; }
 
 .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 17px; }
 .brand-logo { height: 34px; width: auto; display: block; }
