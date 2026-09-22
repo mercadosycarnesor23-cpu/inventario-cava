@@ -264,6 +264,7 @@ body.rol-ver .btn-icon { display: none !important; }
 
 .modal-body-grid { display: flex; flex-direction: column; gap: 12px; }
 .modal-body-grid label { display: flex; flex-direction: column; gap: 5px; font-size: 13px; color: var(--muted); font-weight: 600; }
+.modal-body-grid label[hidden] { display: none; }
 .modal-body-grid input, .modal-body-grid select, .modal-body-grid textarea {
   padding: 9px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; font-family: inherit;
 }
