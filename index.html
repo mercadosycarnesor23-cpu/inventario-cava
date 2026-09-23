@@ -156,6 +156,10 @@
           <input type="number" id="peCanastas" min="0" step="1">
         </label>
       </div>
+      <label class="campo-checkbox">
+        <input type="checkbox" id="peEsPrestamo">
+        Es préstamo (el proveedor me presta este plátano)
+      </label>
       <div class="calc-line" id="calcPlatanoEntrada">Peso neto: <strong>0 kg</strong></div>
       <div class="form-actions">
         <button type="button" class="btn-primary" id="btnGuardarPlatanoEntrada">Registrar entrada</button>
@@ -178,7 +182,8 @@
         <label id="psLoteWrap" hidden>Lote
           <select id="psLote"></select>
         </label>
-        <label>A quién se despachó
+        <label id="psDestinoWrap">
+          <span id="psDestinoLabel">A quién se despachó</span>
           <input type="text" id="psDestino" list="platanoDestinos" placeholder="Ej: Bello">
           <datalist id="platanoDestinos">
             <option value="Bello"></option>
@@ -186,10 +191,16 @@
             <option value="Campo amor"></option>
             <option value="Casa fruver"></option>
             <option value="Edwin"></option>
-            <option value="Desperdicio"></option>
+            <option value="Ovidio"></option>
+            <option value="Paprimos"></option>
+            <option value="Visitación"></option>
           </datalist>
         </label>
       </div>
+      <label class="campo-checkbox">
+        <input type="checkbox" id="psEsPago">
+        Es pago de préstamo (le devuelvo al proveedor)
+      </label>
       <div class="datos-referencia" id="platanoDisponibleRefSalida"></div>
       <div class="form-grid">
         <label>Peso bruto (kg)
@@ -283,11 +294,52 @@
         </table>
       </div>
 
-      <h4 class="platano-subtitulo">Todos los movimientos de la fecha</h4>
+      <h4 class="platano-subtitulo">Buscar movimientos</h4>
+      <div class="filtros-bar">
+        <label class="fecha-label">Desde
+          <input type="date" id="platMovDesde">
+        </label>
+        <label class="fecha-label">Hasta
+          <input type="date" id="platMovHasta">
+        </label>
+        <input type="text" id="platMovTexto" placeholder="Filtrar por destino o proveedor...">
+        <button id="btnFiltrarPlatanoMov" class="btn-ghost">Filtrar</button>
+      </div>
+
+      <h4 class="platano-subtitulo">Entradas</h4>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fecha</th><th>Proveedor</th><th>Bruto</th><th>Canastas</th><th>Neto</th><th>Préstamo</th><th></th></tr></thead>
+          <tbody id="tablaPlatanoEntradasHist"></tbody>
+        </table>
+      </div>
+
+      <h4 class="platano-subtitulo">Salidas</h4>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Fecha</th><th>Producto</th><th>Destino</th><th>Bruto</th><th>Canastas</th><th>Neto</th><th>Pago préstamo</th><th></th></tr></thead>
+          <tbody id="tablaPlatanoSalidasHist"></tbody>
+        </table>
+      </div>
+
+      <h4 class="platano-subtitulo">Maduración y ajustes</h4>
       <div class="table-wrap">
         <table>
           <thead><tr><th>Fecha</th><th>Tipo</th><th>Detalle</th><th>Bruto</th><th>Canastas</th><th>Neto</th><th></th></tr></thead>
-          <tbody id="tablaPlatanoHistorial"></tbody>
+          <tbody id="tablaPlatanoOtrosHist"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title-row">
+        <h3>Deuda de préstamos de plátano</h3>
+        <span class="hint">Lo prestado por proveedores menos lo ya devuelto (histórico completo).</span>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Proveedor</th><th>Prestado</th><th>Pagado</th><th>Saldo</th></tr></thead>
+          <tbody id="tablaPlatanoDeuda"></tbody>
         </table>
       </div>
     </div>
