@@ -186,6 +186,15 @@ main#app { max-width: 1180px; margin: 0 auto; padding: 18px 20px 60px; }
   padding: 9px 10px; border: 1px solid var(--border); border-radius: 6px; font-size: 14px; color: var(--ink); font-family: inherit; font-weight: normal;
 }
 
+.campo-checkbox {
+  display: flex; align-items: center; gap: 8px; font-size: 13.5px; color: var(--ink); font-weight: 600;
+  margin-bottom: 14px; cursor: pointer;
+}
+.campo-checkbox input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--azul); }
+
+.texto-debo { color: var(--rojo); font-weight: 700; }
+.texto-me-deben { color: var(--verde); font-weight: 700; }
+
 .filtro-chip-row { display: flex; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
 .chip {
   border: 1px solid var(--border); background: #fff; padding: 6px 12px; border-radius: 999px;
