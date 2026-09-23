@@ -1183,7 +1183,7 @@ let platanoMaduraciones = [];
 let platanoSalidas = [];
 let platanoAjustes = [];
 
-const PLATANO_PROVEEDORES_SUGERIDOS = ["Carvajal", "Alejandro Granados", "Zuleta", "Finca Alejandro Arias", "Flor del Plátano"];
+const PLATANO_PROVEEDORES_SUGERIDOS = ["Gerardo Carvajal", "Alejandro Granados", "Finca Valle", "Alejandro Arias", "Zuleta", "Flor del Plátano"];
 
 async function cargarPlatano() {
   const [{ data: e, error: e1 }, { data: m, error: e2 }, { data: s, error: e3 }, { data: a, error: e4 }] = await Promise.all([
@@ -1398,9 +1398,7 @@ function renderPlatanoFormularios() {
   ).join("") || `<option value="">Sin lotes con saldo</option>`;
   if ([...selectorPsLote.options].some(o => o.value === valorPrevioPs)) selectorPsLote.value = valorPrevioPs;
 
-  const historicos = platanoEntradas.map(e => e.proveedor).filter(Boolean);
-  const proveedores = [...new Set([...PLATANO_PROVEEDORES_SUGERIDOS, ...historicos])];
-  document.getElementById("platanoProveedores").innerHTML = proveedores.map(p => `<option value="${escapeHtml(p)}"></option>`).join("");
+  document.getElementById("platanoProveedores").innerHTML = PLATANO_PROVEEDORES_SUGERIDOS.map(p => `<option value="${escapeHtml(p)}"></option>`).join("");
 
   const selectorAjLote = document.getElementById("ajLote");
   const valorPrevioAj = selectorAjLote.value;
@@ -1430,8 +1428,9 @@ function actualizarRefSalidaPlatano() {
     ref.innerHTML = `<span>Selecciona verde o maduro para ver el disponible.</span>`;
     return;
   }
+  const esPago = document.getElementById("psEsPago").checked;
   const sug = platanoSugerido(producto);
-  const pideAlgo = Number(sug.bello) > 0 || Number(sug.colores) > 0 || Number(sug.puntos_expres) > 0;
+  const pideAlgo = !esPago && (Number(sug.bello) > 0 || Number(sug.colores) > 0 || Number(sug.puntos_expres) > 0);
   const pidenHtml = pideAlgo
     ? `<span class="sep">·</span><span>Piden hoy: <strong>Bello ${fmtKgPlatano(sug.bello)} · Colores ${fmtKgPlatano(sug.colores)} · Expres ${fmtKgPlatano(sug.puntos_expres)}</strong></span>`
     : "";
@@ -1449,6 +1448,15 @@ function actualizarRefSalidaPlatano() {
 document.getElementById("psProducto").addEventListener("change", actualizarRefSalidaPlatano);
 document.getElementById("psLote").addEventListener("change", actualizarRefSalidaPlatano);
 
+function actualizarModoPagoPrestamo() {
+  const esPago = document.getElementById("psEsPago").checked;
+  document.getElementById("psDestinoLabel").textContent = esPago ? "A qué proveedor le pagas" : "A quién se despachó";
+  document.getElementById("psDestino").setAttribute("list", esPago ? "platanoProveedores" : "platanoDestinos");
+  document.getElementById("psDestino").placeholder = esPago ? "Ej: Gerardo Carvajal" : "Ej: Bello";
+  actualizarRefSalidaPlatano();
+}
+document.getElementById("psEsPago").addEventListener("change", actualizarModoPagoPrestamo);
+
 function wireCalcPlatano(idBruto, idCanastas, idCalc) {
   const recalc = () => {
     const bruto = Number(document.getElementById(idBruto).value) || 0;
@@ -1463,25 +1471,89 @@ wireCalcPlatano("peBruto", "peCanastas", "calcPlatanoEntrada");
 wireCalcPlatano("pmBruto", "pmCanastas", "calcPlatanoMaduracion");
 wireCalcPlatano("psBruto", "psCanastas", "calcPlatanoSalida");
 
-function renderPlatanoHistorial() {
-  const filtroFecha = document.getElementById("filtroFechaPlatano").value || todayISO();
-  document.getElementById("filtroFechaPlatano").value = filtroFecha;
+function filaAccionesPlatano(origen, id) {
+  return `
+    <td>
+      <button class="btn-icon" data-plat-edit="${origen}|${id}">✎</button>
+      <button class="btn-icon danger" data-plat-del="${origen}|${id}">✕</button>
+    </td>
+  `;
+}
 
-  renderPlatanoComparativo();
+function wirePlatanoAccionesEnTabla(tbodyId) {
+  const tbody = document.getElementById(tbodyId);
+  tbody.querySelectorAll("[data-plat-edit]").forEach(b => {
+    b.addEventListener("click", () => {
+      const [origen, id] = b.dataset.platEdit.split("|");
+      abrirEditarPlatanoMovimiento(origen, id);
+    });
+  });
+  tbody.querySelectorAll("[data-plat-del]").forEach(b => {
+    b.addEventListener("click", () => {
+      const [origen, id] = b.dataset.platDel.split("|");
+      abrirEliminarPlatanoConMotivo(origen, id);
+    });
+  });
+}
 
+function ordenarPlatanoPorFecha(a, b) {
+  return (b.fecha + (b.creado_en || "")).localeCompare(a.fecha + (a.creado_en || ""));
+}
+
+function renderPlatanoEntradasHist(enRango, textoFiltro) {
+  const filas = platanoEntradas
+    .filter(r => enRango(r.fecha))
+    .filter(r => !textoFiltro || normalizarNombreSugerido(r.proveedor || "").includes(textoFiltro))
+    .sort(ordenarPlatanoPorFecha)
+    .slice(0, 300);
+  document.getElementById("tablaPlatanoEntradasHist").innerHTML = filas.map(r => `
+    <tr>
+      <td>${r.fecha}</td>
+      <td>${escapeHtml(r.proveedor || "-")}</td>
+      <td>${fmtKgPlatano(r.peso_bruto)}</td>
+      <td>${fmtCanastasPlatano(r.canastas)}</td>
+      <td>${fmtKgPlatano(r.peso_neto)}</td>
+      <td>${r.es_prestamo ? "Sí" : "-"}</td>
+      ${filaAccionesPlatano("entrada", r.id)}
+    </tr>
+  `).join("") || `<tr class="empty-row"><td colspan="7">Sin entradas en ese rango.</td></tr>`;
+  wirePlatanoAccionesEnTabla("tablaPlatanoEntradasHist");
+}
+
+function renderPlatanoSalidasHist(enRango, textoFiltro) {
+  const filas = platanoSalidas
+    .filter(r => enRango(r.fecha))
+    .filter(r => !textoFiltro || normalizarNombreSugerido(r.destino || "").includes(textoFiltro))
+    .sort(ordenarPlatanoPorFecha)
+    .slice(0, 300);
+  document.getElementById("tablaPlatanoSalidasHist").innerHTML = filas.map(r => `
+    <tr>
+      <td>${r.fecha}</td>
+      <td>${r.producto === "MADURO" ? "Maduro" + (r.lote ? ` (lote ${r.lote})` : "") : "Verde"}</td>
+      <td>${escapeHtml(r.destino || "-")}</td>
+      <td>${fmtKgPlatano(r.peso_bruto)}</td>
+      <td>${fmtCanastasPlatano(r.canastas)}</td>
+      <td>${fmtKgPlatano(r.peso_neto)}</td>
+      <td>${r.es_pago_prestamo ? "Sí" : "-"}</td>
+      ${filaAccionesPlatano("salida", r.id)}
+    </tr>
+  `).join("") || `<tr class="empty-row"><td colspan="8">Sin salidas en ese rango.</td></tr>`;
+  wirePlatanoAccionesEnTabla("tablaPlatanoSalidasHist");
+}
+
+function renderPlatanoOtrosHist(enRango) {
   const items = [
-    ...platanoEntradas.map(r => ({ tipo: "Entrada verde", origen: "entrada", detalle: r.proveedor || "-", bruto: r.peso_bruto, canastas: r.canastas, neto: r.peso_neto, ...r })),
-    ...platanoMaduraciones.map(r => ({ tipo: "A maduración", origen: "maduracion", detalle: `Lote ${r.lote}`, bruto: r.peso_bruto, canastas: r.canastas, neto: r.peso_neto, ...r })),
-    ...platanoSalidas.map(r => ({ tipo: "Salida " + r.producto.toLowerCase(), origen: "salida", detalle: r.destino + (r.lote ? ` (lote ${r.lote})` : ""), bruto: r.peso_bruto, canastas: r.canastas, neto: r.peso_neto, ...r })),
-    ...platanoAjustes.map(r => ({
+    ...platanoMaduraciones.filter(r => enRango(r.fecha)).map(r => ({
+      tipo: "A maduración", origen: "maduracion", detalle: `Lote ${r.lote}`,
+      bruto: r.peso_bruto, canastas: r.canastas, neto: r.peso_neto, fecha: r.fecha, creado_en: r.creado_en, id: r.id,
+    })),
+    ...platanoAjustes.filter(r => enRango(r.fecha)).map(r => ({
       tipo: r.kilos ? `Ajuste (${r.concepto || "kilos"})` : "Ajuste canastas", origen: "ajuste",
       detalle: (r.ubicacion === "MADURO" ? `Lote ${r.lote}` : "Verde") + (r.nota ? ` · ${r.nota}` : ""),
-      bruto: null, canastas: r.canastas, neto: r.kilos, ...r,
+      bruto: null, canastas: r.canastas, neto: r.kilos, fecha: r.fecha, creado_en: r.creado_en, id: r.id,
     })),
-  ].filter(it => it.fecha === filtroFecha);
-  items.sort((a, b) => (b.creado_en || "").localeCompare(a.creado_en || ""));
-  const tabla = items.slice(0, 300);
-  document.getElementById("tablaPlatanoHistorial").innerHTML = tabla.map(it => {
+  ].sort(ordenarPlatanoPorFecha).slice(0, 300);
+  document.getElementById("tablaPlatanoOtrosHist").innerHTML = items.map(it => {
     const conSigno = (fmtFn, valor) => (Number(valor) > 0 ? "+" : "") + fmtFn(valor);
     const canastasTexto = it.origen === "ajuste"
       ? (Number(it.canastas) ? conSigno(fmtCanastasPlatano, it.canastas) : "-")
@@ -1497,28 +1569,35 @@ function renderPlatanoHistorial() {
         <td>${it.bruto === null ? "-" : fmtKgPlatano(it.bruto)}</td>
         <td>${canastasTexto}</td>
         <td>${netoTexto}</td>
-        <td>
-          <button class="btn-icon" data-plat-edit="${it.origen}|${it.id}">✎</button>
-          <button class="btn-icon danger" data-plat-del="${it.origen}|${it.id}">✕</button>
-        </td>
+        ${filaAccionesPlatano(it.origen, it.id)}
       </tr>
     `;
-  }).join("") || `<tr class="empty-row"><td colspan="7">Sin movimientos de plátano en esa fecha.</td></tr>`;
+  }).join("") || `<tr class="empty-row"><td colspan="7">Sin maduración ni ajustes en ese rango.</td></tr>`;
+  wirePlatanoAccionesEnTabla("tablaPlatanoOtrosHist");
+}
 
-  document.getElementById("tablaPlatanoHistorial").querySelectorAll("[data-plat-edit]").forEach(b => {
-    b.addEventListener("click", () => {
-      const [origen, id] = b.dataset.platEdit.split("|");
-      abrirEditarPlatanoMovimiento(origen, id);
-    });
-  });
-  document.getElementById("tablaPlatanoHistorial").querySelectorAll("[data-plat-del]").forEach(b => {
-    b.addEventListener("click", () => {
-      const [origen, id] = b.dataset.platDel.split("|");
-      abrirEliminarPlatanoConMotivo(origen, id);
-    });
-  });
+function renderPlatanoHistorial() {
+  const filtroFecha = document.getElementById("filtroFechaPlatano").value || todayISO();
+  document.getElementById("filtroFechaPlatano").value = filtroFecha;
+  renderPlatanoComparativo();
+
+  const desdeInput = document.getElementById("platMovDesde");
+  const hastaInput = document.getElementById("platMovHasta");
+  if (!desdeInput.value) desdeInput.value = todayISO();
+  if (!hastaInput.value) hastaInput.value = todayISO();
+  const desde = desdeInput.value;
+  const hasta = hastaInput.value;
+  const enRango = (fecha) => fecha >= desde && fecha <= hasta;
+  const textoFiltro = normalizarNombreSugerido(document.getElementById("platMovTexto").value);
+
+  renderPlatanoEntradasHist(enRango, textoFiltro);
+  renderPlatanoSalidasHist(enRango, textoFiltro);
+  renderPlatanoOtrosHist(enRango);
 }
 document.getElementById("filtroFechaPlatano").addEventListener("change", renderPlatanoHistorial);
+["platMovDesde", "platMovHasta"].forEach(id => document.getElementById(id).addEventListener("change", renderPlatanoHistorial));
+document.getElementById("platMovTexto").addEventListener("input", renderPlatanoHistorial);
+document.getElementById("btnFiltrarPlatanoMov").addEventListener("click", renderPlatanoHistorial);
 
 function buscarPlatanoRegistro(origen, id) {
   const arr = {
@@ -1611,6 +1690,10 @@ function abrirEditarPlatanoMovimiento(origen, id) {
         <label>Canastas
           <input type="number" id="emCanastas" min="0" step="1" value="${r.canastas}">
         </label>
+        <label class="campo-checkbox">
+          <input type="checkbox" id="emEsPrestamo" ${r.es_prestamo ? "checked" : ""}>
+          Es préstamo (el proveedor me presta este plátano)
+        </label>
         ${motivoHtml}
       </div>
     `, { onConfirm: () => {
@@ -1618,6 +1701,7 @@ function abrirEditarPlatanoMovimiento(origen, id) {
       const proveedor = document.getElementById("emProveedor").value.trim();
       const bruto = Number(document.getElementById("emBruto").value) || 0;
       const canastas = Number(document.getElementById("emCanastas").value) || 0;
+      const esPrestamo = document.getElementById("emEsPrestamo").checked;
       const motivo = document.getElementById("emMotivo").value.trim();
       if (!fecha) { toast("Selecciona la fecha", true); return; }
       if (!proveedor) { toast("Indica de quién entra la mercancía", true); return; }
@@ -1625,7 +1709,7 @@ function abrirEditarPlatanoMovimiento(origen, id) {
       if (canastas <= 0) { toast("Ingresa las canastas", true); return; }
       if (!motivo) { toast("Escribe el motivo de la edición", true); return; }
       guardarEdicionPlatano(origen, id, {
-        fecha, proveedor, peso_bruto: bruto, canastas, peso_neto: pesoNetoPlatano(bruto, canastas),
+        fecha, proveedor, peso_bruto: bruto, canastas, peso_neto: pesoNetoPlatano(bruto, canastas), es_prestamo: esPrestamo,
       }, motivo, r);
     } });
     return;
@@ -1681,7 +1765,7 @@ function abrirEditarPlatanoMovimiento(origen, id) {
         <label id="emLoteWrap">Lote
           <input type="number" id="emLote" min="1" step="1" value="${r.lote || ""}">
         </label>
-        <label>A quién se despachó
+        <label>A quién se despachó / a qué proveedor le pagas
           <input type="text" id="emDestino" value="${escapeHtml(r.destino || "")}">
         </label>
         <label>Peso bruto (kg)
@@ -1689,6 +1773,10 @@ function abrirEditarPlatanoMovimiento(origen, id) {
         </label>
         <label>Canastas
           <input type="number" id="emCanastas" min="0" step="1" value="${r.canastas}">
+        </label>
+        <label class="campo-checkbox">
+          <input type="checkbox" id="emEsPago" ${r.es_pago_prestamo ? "checked" : ""}>
+          Es pago de préstamo (le devuelvo al proveedor)
         </label>
         ${motivoHtml}
       </div>
@@ -1699,6 +1787,7 @@ function abrirEditarPlatanoMovimiento(origen, id) {
       const destino = document.getElementById("emDestino").value.trim();
       const bruto = Number(document.getElementById("emBruto").value) || 0;
       const canastas = Number(document.getElementById("emCanastas").value) || 0;
+      const esPago = document.getElementById("emEsPago").checked;
       const motivo = document.getElementById("emMotivo").value.trim();
       if (!fecha) { toast("Selecciona la fecha", true); return; }
       if (!destino) { toast("Indica a quién se despachó", true); return; }
@@ -1707,7 +1796,7 @@ function abrirEditarPlatanoMovimiento(origen, id) {
       if (producto === "MADURO" && !lote) { toast("Indica el lote", true); return; }
       if (!motivo) { toast("Escribe el motivo de la edición", true); return; }
       guardarEdicionPlatano(origen, id, {
-        fecha, producto, lote, destino, peso_bruto: bruto, canastas, peso_neto: pesoNetoPlatano(bruto, canastas),
+        fecha, producto, lote, destino, peso_bruto: bruto, canastas, peso_neto: pesoNetoPlatano(bruto, canastas), es_pago_prestamo: esPago,
       }, motivo, r);
     } });
     document.getElementById("emProducto").value = r.producto;
@@ -1789,6 +1878,43 @@ function renderPlatano() {
   renderPlatanoLotesTabla();
   renderPlatanoFormularios();
   renderPlatanoHistorial();
+  renderPlatanoDeuda();
+}
+
+// Deuda de prestamos de platano: lo prestado por cada proveedor menos lo ya
+// devuelto (todo el historico, no se reinicia). Saldo positivo = yo debo,
+// saldo negativo = me deben (si se pago de mas).
+function platanoDeudaPorProveedor() {
+  const mapa = new Map();
+  const sumar = (nombreCrudo, campo, valor) => {
+    const nombre = (nombreCrudo || "Sin proveedor").trim();
+    const key = normalizarNombreSugerido(nombre);
+    const prev = mapa.get(key) || { nombre, prestado: 0, pagado: 0 };
+    prev[campo] += valor;
+    mapa.set(key, prev);
+  };
+  platanoEntradas.filter(r => r.es_prestamo).forEach(r => sumar(r.proveedor, "prestado", Number(r.peso_neto)));
+  platanoSalidas.filter(r => r.es_pago_prestamo).forEach(r => sumar(r.destino, "pagado", Number(r.peso_neto)));
+  return Array.from(mapa.values()).map(v => ({ ...v, saldo: v.prestado - v.pagado }));
+}
+
+function renderPlatanoDeuda() {
+  const filas = platanoDeudaPorProveedor().sort((a, b) => Math.abs(b.saldo) - Math.abs(a.saldo));
+  document.getElementById("tablaPlatanoDeuda").innerHTML = filas.map(f => {
+    const saldoTxt = Math.abs(f.saldo) < 0.05
+      ? `<span>Saldado</span>`
+      : f.saldo > 0
+        ? `<span class="texto-debo">Debes ${fmtKgPlatano(f.saldo)}</span>`
+        : `<span class="texto-me-deben">Te deben ${fmtKgPlatano(-f.saldo)}</span>`;
+    return `
+      <tr>
+        <td>${escapeHtml(f.nombre)}</td>
+        <td>${fmtKgPlatano(f.prestado)}</td>
+        <td>${fmtKgPlatano(f.pagado)}</td>
+        <td>${saldoTxt}</td>
+      </tr>
+    `;
+  }).join("") || `<tr class="empty-row"><td colspan="4">No hay préstamos de plátano registrados.</td></tr>`;
 }
 
 async function guardarAjusteCanastas() {
@@ -1841,15 +1967,17 @@ async function guardarPlatanoEntrada(forzar) {
     return;
   }
   const neto = pesoNetoPlatano(bruto, canastas);
+  const esPrestamo = document.getElementById("peEsPrestamo").checked;
   try {
     const { error } = await sb.from("platano_entradas").insert({
-      fecha: fechaTrabajo(), proveedor, peso_bruto: bruto, canastas, peso_neto: neto,
+      fecha: fechaTrabajo(), proveedor, peso_bruto: bruto, canastas, peso_neto: neto, es_prestamo: esPrestamo,
     });
     throwIfError(error);
     document.getElementById("peProveedor").value = "";
     document.getElementById("peBruto").value = "";
     document.getElementById("peCanastas").value = "";
-    toast("Entrada de verde registrada");
+    document.getElementById("peEsPrestamo").checked = false;
+    toast(esPrestamo ? "Entrada registrada como préstamo" : "Entrada de verde registrada");
     await cargarPlatano();
     renderPlatano();
   } catch (err) {
@@ -1912,13 +2040,14 @@ async function guardarPlatanoSalida(forzarRatio, forzarDisponible) {
   if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar salidas.", true); return; }
   const producto = document.getElementById("psProducto").value;
   const destino = document.getElementById("psDestino").value.trim();
+  const esPago = document.getElementById("psEsPago").checked;
   const lote = producto === "MADURO" ? Number(document.getElementById("psLote").value) : null;
   const brutoInput = document.getElementById("psBruto").value;
   const canastasInput = document.getElementById("psCanastas").value;
   const bruto = Number(brutoInput) || 0;
   const canastas = Number(canastasInput) || 0;
   if (!producto) { toast("Selecciona si es verde o maduro", true); return; }
-  if (!destino) { toast("Indica a quién se despachó", true); return; }
+  if (!destino) { toast(esPago ? "Indica a qué proveedor le pagas" : "Indica a quién se despachó", true); return; }
   if (!brutoInput || bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
   if (!canastasInput || canastas <= 0) { toast("Ingresa las canastas", true); return; }
   if (producto === "MADURO" && !lote) { toast("Selecciona un lote", true); return; }
@@ -1950,14 +2079,16 @@ async function guardarPlatanoSalida(forzarRatio, forzarDisponible) {
   }
   try {
     const { error } = await sb.from("platano_salidas").insert({
-      fecha: fechaTrabajo(), destino, producto, lote, peso_bruto: bruto, canastas, peso_neto: neto,
+      fecha: fechaTrabajo(), destino, producto, lote, peso_bruto: bruto, canastas, peso_neto: neto, es_pago_prestamo: esPago,
     });
     throwIfError(error);
     document.getElementById("psProducto").value = "";
     document.getElementById("psDestino").value = "";
     document.getElementById("psBruto").value = "";
     document.getElementById("psCanastas").value = "";
-    toast("Salida registrada");
+    document.getElementById("psEsPago").checked = false;
+    actualizarModoPagoPrestamo();
+    toast(esPago ? "Pago de préstamo registrado" : "Salida registrada");
     await cargarPlatano();
     renderPlatano();
   } catch (err) {
