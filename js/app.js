@@ -58,20 +58,35 @@ function throwIfError(error) {
 }
 
 /* ---------- puerta de acceso (clave simple, no es seguridad real) ----------
-   Dos claves: una de edicion ("editar") y una de solo consulta ("ver"). El
-   rol se guarda en sessionStorage y se usa para ocultar los controles de
+   Tres claves: "editar" (todo, incluye marcar el pedido), "platano" (edita solo
+   la pestana Platano y el resto solo lo ve) y "ver" (solo consulta). El rol se
+   guarda en sessionStorage y se usa para ocultar los controles de
    guardar/editar/eliminar y para bloquear esas acciones a nivel de datos. */
 
 function rolActual() {
   return sessionStorage.getItem("inv_rol") || "";
 }
+// Solo lectura para todo lo que NO es Platano (ver y platano)
 function esSoloLectura() {
+  const rol = rolActual();
+  return rol === "ver" || rol === "platano";
+}
+// Solo lectura dentro de Platano (solo el rol "ver"; "platano" y "editar" pueden editar)
+function esSoloLecturaPlatano() {
   return rolActual() === "ver";
 }
+function puedeMarcarPedido() {
+  return rolActual() === "editar";
+}
 function aplicarRolEnPantalla() {
-  document.body.classList.toggle("rol-ver", esSoloLectura());
+  const rol = rolActual();
+  document.body.classList.toggle("rol-ver", rol === "ver");
+  document.body.classList.toggle("rol-platano", rol === "platano");
   const badge = document.getElementById("badgeSoloLectura");
-  if (badge) badge.hidden = !esSoloLectura();
+  if (badge) {
+    badge.hidden = !(rol === "ver" || rol === "platano");
+    badge.textContent = rol === "platano" ? "Solo plátano" : "Solo lectura";
+  }
 }
 function abrirCompuerta() {
   const ok = !!rolActual();
@@ -84,6 +99,8 @@ function intentarEntrar() {
   const val = document.getElementById("gatePassword").value;
   if (val === window.APP_PASSWORD) {
     sessionStorage.setItem("inv_rol", "editar");
+  } else if (window.APP_PASSWORD_PLATANO && val === window.APP_PASSWORD_PLATANO) {
+    sessionStorage.setItem("inv_rol", "platano");
   } else if (val === window.APP_PASSWORD_VIEW) {
     sessionStorage.setItem("inv_rol", "ver");
   } else {
@@ -127,6 +144,7 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   document.getElementById("tab-" + btn.dataset.tab).classList.add("active");
   actualizarTabActualLabel(btn);
   cerrarMenu();
+  if (btn.dataset.tab === "pedido") cargarPedido().then(renderPedido).catch(() => {});
   refrescarTodo();
   actualizarBarraScroll();
 });
@@ -311,6 +329,10 @@ async function refrescarTodo() {
     } catch (errPlatano) {
       // No bloquea el resto de la app si todavia no existen las tablas de platano
       // (por ejemplo, antes de correr migration_v4.sql en Supabase).
+    }
+    if (document.getElementById("tab-pedido").classList.contains("active")) {
+      await cargarPedido();
+      renderPedido();
     }
     await renderHistorial();
     await renderDiferencias();
@@ -851,9 +873,16 @@ document.getElementById("btnImportarSugerido").addEventListener("click", async (
   if (!texto.trim()) { toast("Pega primero los datos copiados de la hoja", true); return; }
   try {
     const { encontrados, noEncontrados } = await importarSugeridos(texto, fechaTrabajo());
-    if (encontrados === 0) { toast("No se reconoció ningún código en lo pegado", true); return; }
+    let pedidoFilasGuardadas = 0;
+    let pedidoAviso = "";
+    try {
+      pedidoFilasGuardadas = await importarPedidoDia(texto, fechaTrabajo());
+    } catch (errPedido) {
+      pedidoAviso = " · No se pudo guardar el pedido (¿ya corriste la migración v10?)";
+    }
+    if (encontrados === 0 && pedidoFilasGuardadas === 0) { toast("No se reconoció ningún código en lo pegado", true); return; }
     textarea.value = "";
-    toast(`Sugerido importado: ${encontrados} producto(s)` + (noEncontrados ? ` · ${noEncontrados} código(s) no encontrado(s)` : ""));
+    toast(`Sugerido importado: ${encontrados} producto(s)` + (noEncontrados ? ` · ${noEncontrados} código(s) no encontrado(s)` : "") + (pedidoFilasGuardadas ? ` · Pedido: ${pedidoFilasGuardadas} fila(s)` : "") + pedidoAviso);
     await refrescarTodo();
   } catch (err) {
     toast(err.message || "No se pudo importar el sugerido", true);
@@ -1450,7 +1479,7 @@ document.getElementById("psLote").addEventListener("change", actualizarRefSalida
 
 function actualizarModoPagoPrestamo() {
   const esPago = document.getElementById("psEsPago").checked;
-  document.getElementById("psDestinoLabel").textContent = esPago ? "A qué proveedor le pagas" : "A quién se despachó";
+  document.getElementById("psDestinoLabel").textContent = esPago ? "Proveedor del préstamo" : "A quién se despachó";
   document.getElementById("psDestino").setAttribute("list", esPago ? "platanoProveedores" : "platanoDestinos");
   document.getElementById("psDestino").placeholder = esPago ? "Ej: Gerardo Carvajal" : "Ej: Bello";
   actualizarRefSalidaPlatano();
@@ -1608,7 +1637,7 @@ function buscarPlatanoRegistro(origen, id) {
 }
 
 async function eliminarPlatanoMovimiento(origen, id, justificacion, registro) {
-  if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes eliminar movimientos.");
+  if (esSoloLecturaPlatano()) throw new Error("Estás en modo solo lectura, no puedes eliminar movimientos.");
   const tabla = {
     entrada: "platano_entradas", maduracion: "platano_maduracion",
     salida: "platano_salidas", ajuste: "platano_ajustes_canastas",
@@ -1650,7 +1679,7 @@ function abrirEliminarPlatanoConMotivo(origen, id) {
 }
 
 async function editarPlatanoMovimiento(origen, id, cambios, justificacion, registroAnterior) {
-  if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes editar movimientos.");
+  if (esSoloLecturaPlatano()) throw new Error("Estás en modo solo lectura, no puedes editar movimientos.");
   const tabla = {
     entrada: "platano_entradas", maduracion: "platano_maduracion",
     salida: "platano_salidas", ajuste: "platano_ajustes_canastas",
@@ -1666,7 +1695,7 @@ async function editarPlatanoMovimiento(origen, id, cambios, justificacion, regis
 }
 
 function abrirEditarPlatanoMovimiento(origen, id) {
-  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes editar movimientos.", true); return; }
+  if (esSoloLecturaPlatano()) { toast("Estás en modo solo lectura, no puedes editar movimientos.", true); return; }
   const r = buscarPlatanoRegistro(origen, id);
   if (!r) { toast("No se encontró el movimiento", true); return; }
 
@@ -1776,7 +1805,7 @@ function abrirEditarPlatanoMovimiento(origen, id) {
         </label>
         <label class="campo-checkbox">
           <input type="checkbox" id="emEsPago" ${r.es_pago_prestamo ? "checked" : ""}>
-          Es pago de préstamo (le devuelvo al proveedor)
+          Préstamo
         </label>
         ${motivoHtml}
       </div>
@@ -1918,7 +1947,7 @@ function renderPlatanoDeuda() {
 }
 
 async function guardarAjusteCanastas() {
-  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar ajustes.", true); return; }
+  if (esSoloLecturaPlatano()) { toast("Estás en modo solo lectura, no puedes registrar ajustes.", true); return; }
   const ubicacion = document.getElementById("ajUbicacion").value;
   const lote = ubicacion === "MADURO" ? Number(document.getElementById("ajLote").value) : null;
   const canastas = Number(document.getElementById("ajCanastas").value) || 0;
@@ -1947,7 +1976,7 @@ async function guardarAjusteCanastas() {
 document.getElementById("btnGuardarAjusteCanastas").addEventListener("click", guardarAjusteCanastas);
 
 async function guardarPlatanoEntrada(forzar) {
-  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar entradas.", true); return; }
+  if (esSoloLecturaPlatano()) { toast("Estás en modo solo lectura, no puedes registrar entradas.", true); return; }
   const proveedor = document.getElementById("peProveedor").value.trim();
   const brutoInput = document.getElementById("peBruto").value;
   const canastasInput = document.getElementById("peCanastas").value;
@@ -1987,7 +2016,7 @@ async function guardarPlatanoEntrada(forzar) {
 document.getElementById("btnGuardarPlatanoEntrada").addEventListener("click", () => guardarPlatanoEntrada(false));
 
 async function guardarPlatanoMaduracion(forzarRatio, forzarDisponible) {
-  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar maduración.", true); return; }
+  if (esSoloLecturaPlatano()) { toast("Estás en modo solo lectura, no puedes registrar maduración.", true); return; }
   const selectorLote = document.getElementById("pmLote");
   if (!selectorLote.value) { toast("Selecciona un lote", true); return; }
   const lote = selectorLote.value === "nuevo" ? platanoProximoLote() : Number(selectorLote.value);
@@ -2037,7 +2066,7 @@ async function guardarPlatanoMaduracion(forzarRatio, forzarDisponible) {
 document.getElementById("btnGuardarPlatanoMaduracion").addEventListener("click", () => guardarPlatanoMaduracion(false, false));
 
 async function guardarPlatanoSalida(forzarRatio, forzarDisponible) {
-  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes registrar salidas.", true); return; }
+  if (esSoloLecturaPlatano()) { toast("Estás en modo solo lectura, no puedes registrar salidas.", true); return; }
   const producto = document.getElementById("psProducto").value;
   const destino = document.getElementById("psDestino").value.trim();
   const esPago = document.getElementById("psEsPago").checked;
@@ -2047,7 +2076,7 @@ async function guardarPlatanoSalida(forzarRatio, forzarDisponible) {
   const bruto = Number(brutoInput) || 0;
   const canastas = Number(canastasInput) || 0;
   if (!producto) { toast("Selecciona si es verde o maduro", true); return; }
-  if (!destino) { toast(esPago ? "Indica a qué proveedor le pagas" : "Indica a quién se despachó", true); return; }
+  if (!destino) { toast(esPago ? "Indica el proveedor del préstamo" : "Indica a quién se despachó", true); return; }
   if (!brutoInput || bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
   if (!canastasInput || canastas <= 0) { toast("Ingresa las canastas", true); return; }
   if (producto === "MADURO" && !lote) { toast("Selecciona un lote", true); return; }
@@ -2088,7 +2117,7 @@ async function guardarPlatanoSalida(forzarRatio, forzarDisponible) {
     document.getElementById("psCanastas").value = "";
     document.getElementById("psEsPago").checked = false;
     actualizarModoPagoPrestamo();
-    toast(esPago ? "Pago de préstamo registrado" : "Salida registrada");
+    toast(esPago ? "Salida de préstamo registrada" : "Salida registrada");
     await cargarPlatano();
     renderPlatano();
   } catch (err) {
@@ -2096,6 +2125,247 @@ async function guardarPlatanoSalida(forzarRatio, forzarDisponible) {
   }
 }
 document.getElementById("btnGuardarPlatanoSalida").addEventListener("click", () => guardarPlatanoSalida(false, false));
+
+/* ==========================================================================
+   PEDIDO (pedido del dia de Bello y Colores + estado de despacho)
+   Despacho (clave de edicion) marca cada producto; los demas solo ven el estado.
+   ========================================================================== */
+
+const PEDIDO_ESTADOS = {
+  pendiente: "Pendiente",
+  despachado: "Despachado",
+  falta: "Falta",
+  no_hay: "No hay",
+};
+const PEDIDO_SIMBOLOS = { despachado: "✓", falta: "!", no_hay: "✕" };
+let pedidoFilas = [];
+let pedidoError = "";
+let pedidoFiltroEstado = "";
+let pedidoEscribiendo = 0;
+
+function pedidoCampo(destino, tipo) {
+  return `${tipo}_${destino}`;
+}
+
+async function cargarPedido() {
+  const { data, error } = await sb.from("pedido_dia").select("*").eq("fecha", fechaTrabajo()).order("orden", { ascending: true });
+  if (error) {
+    pedidoError = error.message || "Error";
+    pedidoFilas = [];
+    return;
+  }
+  pedidoError = "";
+  pedidoFilas = data || [];
+}
+
+// Guarda el pedido pegado (codigo, producto, unidad, Bello, Colores) tal cual, incluidas
+// las filas sin codigo (ofertas/mallas). Si se vuelve a pegar, se actualizan cantidades y
+// orden pero se conservan las marcas ya hechas.
+async function importarPedidoDia(texto, fecha) {
+  if (!puedeMarcarPedido()) throw new Error("Solo la clave de edición puede importar el pedido.");
+  const parseNum = (v) => {
+    const n = Number(String(v ?? "").replace(/,/g, "").trim());
+    return isNaN(n) ? 0 : n;
+  };
+  const porClave = new Map();
+  texto.split(/\r?\n/).map(l => l.split("\t")).forEach((cols, idx) => {
+    const codigo = String(cols[0] ?? "").trim();
+    const nombre = String(cols[1] ?? "").trim();
+    if (!codigo && !nombre) return;
+    const clave = codigo ? "C:" + codigo : "N:" + normalizarNombreSugerido(nombre);
+    const bello = parseNum(cols[3]);
+    const colores = parseNum(cols[4]);
+    const previo = porClave.get(clave);
+    if (previo) {
+      previo.bello += bello;
+      previo.colores += colores;
+      return;
+    }
+    porClave.set(clave, {
+      fecha, clave, orden: idx, codigo: codigo || null, nombre: nombre || codigo,
+      unidad: String(cols[2] ?? "").trim() || null, bello, colores,
+    });
+  });
+
+  const { data: existentes, error: errExistentes } = await sb.from("pedido_dia").select("clave").eq("fecha", fecha);
+  throwIfError(errExistentes);
+  const clavesExistentes = new Set((existentes || []).map(r => r.clave));
+  const ahora = new Date().toISOString();
+  // Filas sin pedido solo se guardan si ya existian (para poder ponerlas en 0).
+  const aGuardar = Array.from(porClave.values())
+    .filter(r => r.bello > 0 || r.colores > 0 || clavesExistentes.has(r.clave))
+    .map(r => ({ ...r, actualizado_en: ahora }));
+  if (!aGuardar.length) return 0;
+  const { error } = await sb.from("pedido_dia").upsert(aGuardar, { onConflict: "fecha,clave" });
+  throwIfError(error);
+  return aGuardar.filter(r => r.bello > 0 || r.colores > 0).length;
+}
+
+async function marcarPedido(id, destino, estado, nota) {
+  if (!puedeMarcarPedido()) { toast("Solo despacho puede marcar el pedido.", true); return; }
+  const campoEstado = pedidoCampo(destino, "estado");
+  const campoNota = pedidoCampo(destino, "nota");
+  const fila = pedidoFilas.find(f => f.id === id);
+  const anterior = fila ? { estado: fila[campoEstado], nota: fila[campoNota] } : null;
+  if (fila) {
+    fila[campoEstado] = estado;
+    fila[campoNota] = nota || null;
+    renderPedido();
+  }
+  pedidoEscribiendo++;
+  try {
+    const { error } = await sb.from("pedido_dia").update({
+      [campoEstado]: estado, [campoNota]: nota || null, actualizado_en: new Date().toISOString(),
+    }).eq("id", id);
+    throwIfError(error);
+  } catch (err) {
+    if (fila && anterior) {
+      fila[campoEstado] = anterior.estado;
+      fila[campoNota] = anterior.nota;
+      renderPedido();
+    }
+    toast(err.message || "No se pudo guardar la marca", true);
+  } finally {
+    pedidoEscribiendo--;
+  }
+}
+
+function abrirNotaPedido(fila, destino, estado) {
+  const nombreDestino = destino === "bello" ? "Bello" : "Colores";
+  const esFalta = estado === "falta";
+  abrirModal(`${esFalta ? "Falta" : "No hay"} · ${fila.nombre} (${nombreDestino})`, `
+    <div class="modal-body-grid">
+      <label>${esFalta ? "¿Cuánto falta o qué pasó? (opcional)" : "¿Por qué no se pudo? (opcional)"}
+        <input type="text" id="pedNota" placeholder="${esFalta ? "Ej: faltan 5" : "Ej: no se consigue"}">
+      </label>
+    </div>
+  `, {
+    textoConfirmar: "Guardar",
+    onConfirm: () => {
+      const nota = document.getElementById("pedNota").value.trim();
+      cerrarModal();
+      marcarPedido(fila.id, destino, estado, nota);
+    },
+  });
+  const input = document.getElementById("pedNota");
+  input.addEventListener("keydown", (ev) => { if (ev.key === "Enter") document.getElementById("modalConfirmar").click(); });
+  input.focus();
+}
+
+function pedidoConteos(destino) {
+  const c = { total: 0, pendiente: 0, despachado: 0, falta: 0, no_hay: 0 };
+  pedidoFilas.forEach(f => {
+    if (!(Number(f[destino]) > 0)) return;
+    c.total++;
+    c[f[pedidoCampo(destino, "estado")]]++;
+  });
+  return c;
+}
+
+function pedidoCardHtml(titulo, c) {
+  const pct = (n) => (c.total ? (n / c.total) * 100 : 0);
+  return `
+    <div class="ped-card">
+      <div class="ped-card-titulo">${titulo}<span>${c.despachado} de ${c.total} despachados</span></div>
+      <div class="ped-barra">
+        <i class="b-despachado" style="width:${pct(c.despachado)}%"></i>
+        <i class="b-falta" style="width:${pct(c.falta)}%"></i>
+        <i class="b-no_hay" style="width:${pct(c.no_hay)}%"></i>
+      </div>
+      <div class="ped-card-detalle">${c.pendiente} pendientes · ${c.falta} con falta · ${c.no_hay} sin existencia</div>
+    </div>
+  `;
+}
+
+function pedidoCeldaHtml(fila, destino) {
+  const cantidad = Number(fila[destino]);
+  if (!(cantidad > 0)) return `<td class="ped-celda"><span class="ped-vacio">—</span></td>`;
+  const estado = fila[pedidoCampo(destino, "estado")];
+  const nota = fila[pedidoCampo(destino, "nota")];
+  const cantidadTxt = cantidad.toLocaleString("es-CO", { maximumFractionDigits: 2 });
+  const botones = puedeMarcarPedido()
+    ? `<div class="ped-botones">${["despachado", "falta", "no_hay"].map(e => `
+        <button type="button" class="ped-btn${estado === e ? " activo" : ""}" data-id="${fila.id}" data-destino="${destino}" data-estado="${e}"
+          title="${PEDIDO_ESTADOS[e]}" aria-label="${PEDIDO_ESTADOS[e]}">${PEDIDO_SIMBOLOS[e]}</button>`).join("")}</div>`
+    : "";
+  return `
+    <td class="ped-celda ped-${estado}">
+      <div class="ped-cant">${cantidadTxt}${fila.unidad ? ` <small>${escapeHtml(fila.unidad)}</small>` : ""}</div>
+      <span class="ped-estado ped-estado-${estado}">${PEDIDO_ESTADOS[estado]}</span>
+      ${nota ? `<div class="ped-nota">${escapeHtml(nota)}</div>` : ""}
+      ${botones}
+    </td>
+  `;
+}
+
+function renderPedido() {
+  const tbody = document.getElementById("tablaPedido");
+  document.getElementById("pedidoHint").textContent = `Pedido del ${fechaExcel(fechaTrabajo())}`;
+  if (pedidoError) {
+    document.getElementById("pedidoResumen").innerHTML = "";
+    document.getElementById("pedidoChips").innerHTML = "";
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="3">Esta sección todavía no está activada (falta crear la tabla en Supabase).</td></tr>`;
+    return;
+  }
+  const conPedido = pedidoFilas.filter(f => Number(f.bello) > 0 || Number(f.colores) > 0);
+  document.getElementById("pedidoResumen").innerHTML =
+    pedidoCardHtml("Bello", pedidoConteos("bello")) + pedidoCardHtml("Colores", pedidoConteos("colores"));
+
+  const filaTieneEstado = (f, estado) =>
+    (Number(f.bello) > 0 && f.estado_bello === estado) || (Number(f.colores) > 0 && f.estado_colores === estado);
+  const chips = [["", "Todos"], ["pendiente", "Pendientes"], ["despachado", "Despachados"], ["falta", "Con falta"], ["no_hay", "No hay"]];
+  document.getElementById("pedidoChips").innerHTML = chips.map(([clave, texto]) => {
+    const n = clave ? conPedido.filter(f => filaTieneEstado(f, clave)).length : conPedido.length;
+    return `<button type="button" class="chip${pedidoFiltroEstado === clave ? " active" : ""}" data-estado="${clave}">${texto} (${n})</button>`;
+  }).join("");
+
+  const texto = normalizarNombreSugerido(document.getElementById("pedidoBuscar").value);
+  const visibles = conPedido
+    .filter(f => !pedidoFiltroEstado || filaTieneEstado(f, pedidoFiltroEstado))
+    .filter(f => !texto || normalizarNombreSugerido(f.nombre).includes(texto) || String(f.codigo || "").includes(texto));
+
+  const leyenda = puedeMarcarPedido()
+    ? `<tr class="empty-row"><td colspan="3" class="ped-leyenda">Toca ✓ cuando ya despachaste, ! si falta una parte, ✕ si no hay o no se pudo. Vuelve a tocar el mismo botón para dejarlo pendiente.</td></tr>`
+    : "";
+  tbody.innerHTML = visibles.length
+    ? leyenda + visibles.map(f => `
+      <tr>
+        <td class="ped-prod"><strong>${escapeHtml(f.nombre)}</strong>${f.codigo ? `<span class="ped-cod">${escapeHtml(f.codigo)}</span>` : ""}</td>
+        ${pedidoCeldaHtml(f, "bello")}
+        ${pedidoCeldaHtml(f, "colores")}
+      </tr>`).join("")
+    : `<tr class="empty-row"><td colspan="3">${conPedido.length
+        ? "Ningún producto coincide con el filtro."
+        : "No hay pedido cargado para esta fecha." + (puedeMarcarPedido() ? " Pégalo en Despacho → Importar sugerido." : " Pídele a despacho que lo cargue.")}</td></tr>`;
+}
+
+document.getElementById("pedidoChips").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  pedidoFiltroEstado = chip.dataset.estado;
+  renderPedido();
+});
+document.getElementById("pedidoBuscar").addEventListener("input", renderPedido);
+document.getElementById("tablaPedido").addEventListener("click", (e) => {
+  const btn = e.target.closest(".ped-btn");
+  if (!btn) return;
+  const { id, destino, estado } = btn.dataset;
+  const fila = pedidoFilas.find(f => f.id === id);
+  if (!fila) return;
+  if (fila[pedidoCampo(destino, "estado")] === estado) { marcarPedido(id, destino, "pendiente", ""); return; }
+  if (estado === "despachado") { marcarPedido(id, destino, estado, ""); return; }
+  abrirNotaPedido(fila, destino, estado);
+});
+
+// Los demas companeros ven los cambios sin recargar: se refresca solo cada 20 s
+// mientras la pestana esta abierta.
+setInterval(async () => {
+  if (!rolActual() || document.hidden || pedidoEscribiendo > 0) return;
+  if (!document.getElementById("tab-pedido").classList.contains("active")) return;
+  if (!document.getElementById("modalOverlay").hidden) return;
+  await cargarPedido();
+  renderPedido();
+}, 20000);
 
 /* ==========================================================================
    HISTORIAL
