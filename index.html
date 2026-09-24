@@ -36,6 +36,7 @@
   <nav class="tabs" id="tabs">
     <button class="tab-btn active" data-tab="inventario">Inventario</button>
     <button class="tab-btn" data-tab="despacho">Despacho</button>
+    <button class="tab-btn" data-tab="pedido">Pedido</button>
     <button class="tab-btn" data-tab="platano">Plátano</button>
     <button class="tab-btn" data-tab="historial">Historial</button>
     <button class="tab-btn" data-tab="productos">Productos</button>
@@ -123,6 +124,25 @@
     </div>
   </section>
 
+  <!-- PEDIDO -->
+  <section class="tab-panel" id="tab-pedido">
+    <div class="panel">
+      <div class="panel-title-row">
+        <h3>Pedido de Bello y Colores</h3>
+        <span class="hint" id="pedidoHint"></span>
+      </div>
+      <div class="ped-resumen" id="pedidoResumen"></div>
+      <div class="filtro-chip-row" id="pedidoChips"></div>
+      <input type="text" id="pedidoBuscar" class="input-search" placeholder="Buscar producto o código...">
+      <div class="table-wrap">
+        <table class="tabla-pedido">
+          <thead><tr><th>Producto</th><th>Bello</th><th>Colores</th></tr></thead>
+          <tbody id="tablaPedido"></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
   <!-- PLATANO -->
   <section class="tab-panel" id="tab-platano">
     <div class="panel">
@@ -142,7 +162,13 @@
     <div class="panel solo-editor panel-platano-entrada">
       <div class="panel-title-row">
         <h3>Registrar entrada de verde</h3>
-        <span class="hint">Mercancía que llega de proveedor.</span>
+        <div class="panel-title-extra">
+          <span class="hint">Mercancía que llega de proveedor.</span>
+          <label class="campo-checkbox campo-checkbox-inline">
+            <input type="checkbox" id="peEsPrestamo">
+            Préstamo
+          </label>
+        </div>
       </div>
       <div class="form-grid">
         <label>De quién entra
@@ -156,10 +182,6 @@
           <input type="number" id="peCanastas" min="0" step="1">
         </label>
       </div>
-      <label class="campo-checkbox">
-        <input type="checkbox" id="peEsPrestamo">
-        Es préstamo (el proveedor me presta este plátano)
-      </label>
       <div class="calc-line" id="calcPlatanoEntrada">Peso neto: <strong>0 kg</strong></div>
       <div class="form-actions">
         <button type="button" class="btn-primary" id="btnGuardarPlatanoEntrada">Registrar entrada</button>
@@ -169,7 +191,13 @@
     <div class="panel solo-editor panel-platano-salida">
       <div class="panel-title-row">
         <h3>Registrar salida</h3>
-        <span class="hint">Despacho de plátano verde o maduro a un punto.</span>
+        <div class="panel-title-extra">
+          <span class="hint">Despacho de plátano verde o maduro a un punto.</span>
+          <label class="campo-checkbox campo-checkbox-inline">
+            <input type="checkbox" id="psEsPago">
+            Préstamo
+          </label>
+        </div>
       </div>
       <div class="form-grid">
         <label>Producto
@@ -197,10 +225,6 @@
           </datalist>
         </label>
       </div>
-      <label class="campo-checkbox">
-        <input type="checkbox" id="psEsPago">
-        Es pago de préstamo (le devuelvo al proveedor)
-      </label>
       <div class="datos-referencia" id="platanoDisponibleRefSalida"></div>
       <div class="form-grid">
         <label>Peso bruto (kg)
@@ -317,7 +341,7 @@
       <h4 class="platano-subtitulo">Salidas</h4>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Fecha</th><th>Producto</th><th>Destino</th><th>Bruto</th><th>Canastas</th><th>Neto</th><th>Pago préstamo</th><th></th></tr></thead>
+          <thead><tr><th>Fecha</th><th>Producto</th><th>Destino</th><th>Bruto</th><th>Canastas</th><th>Neto</th><th>Préstamo</th><th></th></tr></thead>
           <tbody id="tablaPlatanoSalidasHist"></tbody>
         </table>
       </div>
