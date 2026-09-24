@@ -94,6 +94,7 @@ body {
   border: none; background: transparent; padding: 8px 14px; border-radius: 6px;
   cursor: pointer; font-size: 14px; color: var(--muted); font-weight: 600;
 }
+.tab-btn[hidden], .btn-ghost[hidden] { display: none; }
 .tab-btn:hover { background: var(--azul-claro); color: var(--azul-dark); }
 .tab-btn.active { background: var(--azul); color: #fff; }
 
