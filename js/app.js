@@ -2312,19 +2312,13 @@ function pedidoCeldaHtml(fila, destino) {
   const estado = fila[pedidoCampo(destino, "estado")];
   const nota = fila[pedidoCampo(destino, "nota")];
   const cantidadTxt = cantidad.toLocaleString("es-CO", { maximumFractionDigits: 2 });
-  const botones = puedeMarcarPedido()
-    ? `<div class="ped-botones">${["despachado", "falta", "no_hay"].map(e => `
-        <button type="button" class="ped-btn${estado === e ? " activo" : ""}" data-id="${fila.id}" data-destino="${destino}" data-estado="${e}"
-          title="${PEDIDO_ESTADOS[e]}" aria-label="${PEDIDO_ESTADOS[e]}">${PEDIDO_SIMBOLOS[e]}</button>`).join("")}</div>`
-    : "";
-  return `
-    <td class="ped-celda ped-${estado}">
-      <div class="ped-cant">${cantidadTxt}${fila.unidad ? ` <small>${escapeHtml(fila.unidad)}</small>` : ""}</div>
-      <span class="ped-estado ped-estado-${estado}">${PEDIDO_ESTADOS[estado]}</span>
-      ${nota ? `<div class="ped-nota">${escapeHtml(nota)}</div>` : ""}
-      ${botones}
-    </td>
-  `;
+  // Con permiso de marcar, el estado se ve en los botones y el color de la celda;
+  // sin permiso, se muestra la etiqueta del estado.
+  const control = puedeMarcarPedido()
+    ? `<span class="ped-botones">${["despachado", "falta", "no_hay"].map(e =>
+        `<button type="button" class="ped-btn${estado === e ? " activo" : ""}" data-id="${fila.id}" data-destino="${destino}" data-estado="${e}" title="${PEDIDO_ESTADOS[e]}" aria-label="${PEDIDO_ESTADOS[e]}">${PEDIDO_SIMBOLOS[e]}</button>`).join("")}</span>`
+    : `<span class="ped-estado ped-estado-${estado}">${PEDIDO_ESTADOS[estado]}</span>`;
+  return `<td class="ped-celda ped-${estado}"><div class="ped-linea"><span class="ped-cant">${cantidadTxt}${fila.unidad ? ` <small>${escapeHtml(fila.unidad)}</small>` : ""}</span>${control}${nota ? `<span class="ped-nota">${escapeHtml(nota)}</span>` : ""}</div></td>`;
 }
 
 function renderPedido() {
@@ -2353,16 +2347,9 @@ function renderPedido() {
     .filter(f => !pedidoFiltroEstado || filaTieneEstado(f, pedidoFiltroEstado))
     .filter(f => !texto || normalizarNombreSugerido(f.nombre).includes(texto) || String(f.codigo || "").includes(texto));
 
-  const leyenda = puedeMarcarPedido()
-    ? `<tr class="empty-row"><td colspan="3" class="ped-leyenda">Toca ✓ cuando ya despachaste, ! si falta una parte, ✕ si no hay o no se pudo. Vuelve a tocar el mismo botón para dejarlo pendiente.</td></tr>`
-    : "";
+  document.getElementById("pedidoLeyenda").hidden = !puedeMarcarPedido();
   tbody.innerHTML = visibles.length
-    ? leyenda + visibles.map(f => `
-      <tr>
-        <td class="ped-prod"><strong>${escapeHtml(f.nombre)}</strong>${f.codigo ? `<span class="ped-cod">${escapeHtml(f.codigo)}</span>` : ""}</td>
-        ${pedidoCeldaHtml(f, "bello")}
-        ${pedidoCeldaHtml(f, "colores")}
-      </tr>`).join("")
+    ? visibles.map(f => `<tr><td class="ped-prod"><strong>${escapeHtml(f.nombre)}</strong>${f.codigo ? `<span class="ped-cod">${escapeHtml(f.codigo)}</span>` : ""}</td>${pedidoCeldaHtml(f, "bello")}${pedidoCeldaHtml(f, "colores")}</tr>`).join("")
     : `<tr class="empty-row"><td colspan="3">${conPedido.length
         ? "Ningún producto coincide con el filtro."
         : "No hay pedido cargado para esta fecha." + (puedeMarcarPedido() ? " Pégalo en Despacho → Importar sugerido." : " Pídele a despacho que lo cargue.")}</td></tr>`;
