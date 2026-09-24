@@ -2190,14 +2190,20 @@ async function importarPedidoDia(texto, fecha) {
     });
   });
 
-  const { data: existentes, error: errExistentes } = await sb.from("pedido_dia").select("clave").eq("fecha", fecha);
+  const { data: existentes, error: errExistentes } = await sb.from("pedido_dia").select("clave,orden").eq("fecha", fecha);
   throwIfError(errExistentes);
   const clavesExistentes = new Set((existentes || []).map(r => r.clave));
   const ahora = new Date().toISOString();
   // Filas sin pedido solo se guardan si ya existian (para poder ponerlas en 0).
   const aGuardar = Array.from(porClave.values())
-    .filter(r => r.bello > 0 || r.colores > 0 || clavesExistentes.has(r.clave))
-    .map(r => ({ ...r, actualizado_en: ahora }));
+    .filter(r => r.bello > 0 || r.colores > 0 || clavesExistentes.has(r.clave));
+  // Si lo pegado no comparte ningun producto con lo que ya hay (por ejemplo, solo las
+  // ofertas pegadas aparte), va al final en vez de mezclarse con los primeros.
+  const solapa = aGuardar.some(r => clavesExistentes.has(r.clave));
+  const desplazamiento = clavesExistentes.size && !solapa
+    ? Math.max(...(existentes || []).map(r => Number(r.orden) || 0)) + 1
+    : 0;
+  aGuardar.forEach(r => { r.orden += desplazamiento; r.actualizado_en = ahora; });
   if (!aGuardar.length) return 0;
   const { error } = await sb.from("pedido_dia").upsert(aGuardar, { onConflict: "fecha,clave" });
   throwIfError(error);
