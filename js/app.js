@@ -332,6 +332,9 @@ async function refrescarTodo() {
     }
     if (document.getElementById("tab-pedido").classList.contains("active")) {
       await cargarPedido();
+      if (!pedidoError && pedidoFilas.length === 0 && puedeMarcarPedido() && await sembrarPedidoDesdeSugerido()) {
+        await cargarPedido();
+      }
       renderPedido();
     }
     await renderHistorial();
@@ -2199,6 +2202,32 @@ async function importarPedidoDia(texto, fecha) {
   const { error } = await sb.from("pedido_dia").upsert(aGuardar, { onConflict: "fecha,clave" });
   throwIfError(error);
   return aGuardar.filter(r => r.bello > 0 || r.colores > 0).length;
+}
+
+// Si ya se importo el sugerido del dia (antes de existir esta seccion) pero el pedido
+// esta vacio, lo arma desde ese sugerido para no tener que pegarlo otra vez. Solo trae
+// productos con codigo; un nuevo "Importar sugerido" lo completa (ofertas y orden de la hoja).
+async function sembrarPedidoDesdeSugerido() {
+  const porClave = new Map();
+  estado.filter(it => it.tieneSugerido && (it.sugeridoBello > 0 || it.sugeridoColores > 0)).forEach((it, idx) => {
+    const codigo = String(it.codigo || "").trim();
+    if (!codigo) return;
+    const clave = "C:" + codigo;
+    const previo = porClave.get(clave);
+    if (previo) {
+      previo.bello += it.sugeridoBello;
+      previo.colores += it.sugeridoColores;
+      return;
+    }
+    porClave.set(clave, {
+      fecha: fechaTrabajo(), clave, orden: idx, codigo, nombre: it.nombre,
+      unidad: it.unidad ? String(it.unidad).toLowerCase() : null,
+      bello: it.sugeridoBello, colores: it.sugeridoColores, actualizado_en: new Date().toISOString(),
+    });
+  });
+  if (!porClave.size) return false;
+  const { error } = await sb.from("pedido_dia").upsert(Array.from(porClave.values()), { onConflict: "fecha,clave" });
+  return !error;
 }
 
 async function marcarPedido(id, destino, estado, nota) {
