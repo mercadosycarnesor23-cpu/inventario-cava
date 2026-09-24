@@ -78,6 +78,8 @@ function esSoloLecturaPlatano() {
 function puedeMarcarPedido() {
   return rolActual() === "editar";
 }
+// Con la clave de plantano solo se ven estas pestanas (la ultima es la de entrada).
+const TABS_PERMITIDAS = { platano: ["pedido", "platano"] };
 function aplicarRolEnPantalla() {
   const rol = rolActual();
   document.body.classList.toggle("rol-ver", rol === "ver");
@@ -86,6 +88,21 @@ function aplicarRolEnPantalla() {
   if (badge) {
     badge.hidden = !(rol === "ver" || rol === "platano");
     badge.textContent = rol === "platano" ? "Solo plátano" : "Solo lectura";
+  }
+  const permitidas = TABS_PERMITIDAS[rol];
+  document.querySelectorAll(".tab-btn").forEach(b => { b.hidden = !!permitidas && !permitidas.includes(b.dataset.tab); });
+  const btnRespaldo = document.getElementById("btnBackup");
+  if (btnRespaldo) btnRespaldo.hidden = rol === "platano";
+  if (permitidas) {
+    const activa = document.querySelector(".tab-btn.active");
+    if (!activa || activa.hidden) {
+      const destino = document.querySelector(`.tab-btn[data-tab="${permitidas[permitidas.length - 1]}"]`);
+      document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
+      document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
+      destino.classList.add("active");
+      document.getElementById("tab-" + destino.dataset.tab).classList.add("active");
+      actualizarTabActualLabel(destino);
+    }
   }
 }
 function abrirCompuerta() {
