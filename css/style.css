@@ -192,6 +192,9 @@ main#app { max-width: 1180px; margin: 0 auto; padding: 18px 20px 60px; }
 }
 .campo-checkbox input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; accent-color: var(--azul); }
 
+.panel-title-extra { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-left: auto; }
+.campo-checkbox-inline { margin-bottom: 0; }
+
 .texto-debo { color: var(--rojo); font-weight: 700; }
 .texto-me-deben { color: var(--verde); font-weight: 700; }
 
@@ -225,6 +228,10 @@ tbody tr:hover { background: #fafbfd; }
 /* Modo solo lectura: oculta todo lo que sirve para guardar, editar o eliminar. */
 body.rol-ver .solo-editor,
 body.rol-ver .btn-icon { display: none !important; }
+
+/* Rol "platano": puede editar solo la pestana Platano; en las demas es solo lectura. */
+body.rol-platano .tab-panel:not(#tab-platano) .solo-editor,
+body.rol-platano .tab-panel:not(#tab-platano) .btn-icon { display: none !important; }
 
 .kpi-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 14px; margin-bottom: 18px; }
 .kpi-card { border-radius: 12px; padding: 16px; color: #fff; display: flex; flex-direction: column; gap: 6px; }
@@ -305,6 +312,63 @@ body.rol-ver .btn-icon { display: none !important; }
   .tab-btn { width: 100%; text-align: left; padding: 10px 12px; }
   .topbar-actions { order: 4; width: 100%; justify-content: space-between; margin-left: 0; }
   .split-row { grid-template-columns: 1fr; }
+}
+
+/* ---------- Seccion Pedido (estado por producto para Bello y Colores) ---------- */
+.ped-resumen { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-bottom: 14px; }
+.ped-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: #fff; }
+.ped-card-titulo { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-weight: 700; margin-bottom: 8px; color: var(--ink); }
+.ped-card-titulo span { font-size: 12.5px; color: var(--muted); font-weight: 600; }
+.ped-barra { height: 10px; border-radius: 999px; background: #eef0f1; overflow: hidden; display: flex; }
+.ped-barra i { display: block; height: 100%; }
+.ped-barra .b-despachado { background: var(--verde); }
+.ped-barra .b-falta { background: var(--amarillo); }
+.ped-barra .b-no_hay { background: var(--rojo); }
+.ped-card-detalle { margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+
+.chip[data-estado="despachado"].active { background: var(--verde); border-color: var(--verde); }
+.chip[data-estado="falta"].active { background: var(--amarillo); border-color: var(--amarillo); color: var(--amarillo-ink); }
+.chip[data-estado="no_hay"].active { background: var(--rojo); border-color: var(--rojo); }
+.chip[data-estado="pendiente"].active { background: var(--muted); border-color: var(--muted); }
+
+.tabla-pedido td { vertical-align: top; padding: 8px 10px; }
+.tabla-pedido .ped-prod strong { display: block; font-size: 14px; }
+.tabla-pedido .ped-cod { font-size: 11.5px; color: var(--muted); }
+.ped-celda { min-width: 150px; }
+.ped-celda.ped-despachado { background: var(--verde-claro); }
+.ped-celda.ped-falta { background: var(--amarillo-claro); }
+.ped-celda.ped-no_hay { background: var(--rojo-claro); }
+.ped-cant { font-size: 15px; font-weight: 700; }
+.ped-cant small { font-weight: 600; color: var(--muted); font-size: 11.5px; }
+.ped-estado { display: inline-block; margin-top: 4px; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700; }
+.ped-estado-pendiente { background: #eef0f1; color: var(--muted); }
+.ped-estado-despachado { background: var(--verde); color: #fff; }
+.ped-estado-falta { background: var(--amarillo); color: var(--amarillo-ink); }
+.ped-estado-no_hay { background: var(--rojo); color: #fff; }
+.ped-nota { font-size: 12px; color: var(--ink); margin-top: 3px; font-style: italic; }
+.ped-vacio { color: var(--border); font-size: 18px; }
+.ped-botones { display: flex; gap: 6px; margin-top: 8px; }
+.ped-btn {
+  flex: 1; min-width: 40px; padding: 9px 0; border-radius: 8px; border: 2px solid var(--border);
+  background: #fff; font-size: 16px; font-weight: 800; cursor: pointer; line-height: 1; font-family: inherit;
+}
+.ped-btn[data-estado="despachado"] { color: var(--verde); border-color: var(--verde); }
+.ped-btn[data-estado="falta"] { color: var(--amarillo-ink); border-color: var(--amarillo); }
+.ped-btn[data-estado="no_hay"] { color: var(--rojo); border-color: var(--rojo); }
+.ped-btn.activo[data-estado="despachado"] { background: var(--verde); color: #fff; }
+.ped-btn.activo[data-estado="falta"] { background: var(--amarillo); color: var(--amarillo-ink); }
+.ped-btn.activo[data-estado="no_hay"] { background: var(--rojo); color: #fff; }
+.ped-leyenda { font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
+
+@media (max-width: 720px) {
+  .tabla-pedido th, .tabla-pedido td { padding: 6px 4px; }
+  .tabla-pedido .ped-prod { width: 30%; }
+  .tabla-pedido .ped-prod strong { font-size: 13px; word-break: break-word; }
+  .ped-celda { min-width: 0; }
+  .ped-botones { gap: 4px; }
+  .ped-btn { min-width: 0; padding: 9px 0; font-size: 15px; }
+  .ped-cant { font-size: 14px; }
+  .ped-estado { font-size: 11px; padding: 2px 7px; }
 }
 
 /* ---------- Hojas de impresion del sugerido ---------- */
