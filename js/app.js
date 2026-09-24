@@ -2167,6 +2167,19 @@ function pedidoCampo(destino, tipo) {
   return `${tipo}_${destino}`;
 }
 
+// Si el nombre que viene de la hoja esta vacio o es solo un numero, se usa el del catalogo.
+function pedidoNombreReal(nombre, codigo) {
+  const n = String(nombre || "").trim();
+  if ((!n || /^\d+([.,]\d+)?$/.test(n)) && codigo) {
+    const p = productos.find(x => String(x.codigo).trim() === String(codigo).trim());
+    if (p) return p.nombre;
+  }
+  return n || String(codigo || "");
+}
+function pedidoNombre(f) {
+  return pedidoNombreReal(f.nombre, f.codigo);
+}
+
 async function cargarPedido() {
   const { data, error } = await sb.from("pedido_dia").select("*").eq("fecha", fechaTrabajo()).order("orden", { ascending: true });
   if (error) {
@@ -2202,7 +2215,7 @@ async function importarPedidoDia(texto, fecha) {
       return;
     }
     porClave.set(clave, {
-      fecha, clave, orden: idx, codigo: codigo || null, nombre: nombre || codigo,
+      fecha, clave, orden: idx, codigo: codigo || null, nombre: pedidoNombreReal(nombre, codigo),
       unidad: String(cols[2] ?? "").trim() || null, bello, colores,
     });
   });
@@ -2285,7 +2298,7 @@ async function marcarPedido(id, destino, estado, nota) {
 function abrirNotaPedido(fila, destino, estado) {
   const nombreDestino = destino === "bello" ? "Bello" : "Colores";
   const esFalta = estado === "falta";
-  abrirModal(`${esFalta ? "Falta" : "No hay"} · ${fila.nombre} (${nombreDestino})`, `
+  abrirModal(`${esFalta ? "Falta" : "No hay"} · ${pedidoNombre(fila)} (${nombreDestino})`, `
     <div class="modal-body-grid">
       <label>${esFalta ? "¿Cuánto falta o qué pasó? (opcional)" : "¿Por qué no se pudo? (opcional)"}
         <input type="text" id="pedNota" placeholder="${esFalta ? "Ej: faltan 5" : "Ej: no se consigue"}">
@@ -2368,11 +2381,12 @@ function renderPedido() {
   const texto = normalizarNombreSugerido(document.getElementById("pedidoBuscar").value);
   const visibles = conPedido
     .filter(f => !pedidoFiltroEstado || filaTieneEstado(f, pedidoFiltroEstado))
-    .filter(f => !texto || normalizarNombreSugerido(f.nombre).includes(texto) || String(f.codigo || "").includes(texto));
+    .filter(f => !texto || normalizarNombreSugerido(pedidoNombre(f)).includes(texto) || String(f.codigo || "").includes(texto))
+    .sort((a, b) => pedidoNombre(a).localeCompare(pedidoNombre(b), "es", { sensitivity: "base", numeric: true }));
 
   document.getElementById("pedidoLeyenda").hidden = !puedeMarcarPedido();
   tbody.innerHTML = visibles.length
-    ? visibles.map(f => `<tr><td class="ped-prod"><strong>${escapeHtml(f.nombre)}</strong>${f.codigo ? `<span class="ped-cod">${escapeHtml(f.codigo)}</span>` : ""}</td>${pedidoCeldaHtml(f, "bello")}${pedidoCeldaHtml(f, "colores")}</tr>`).join("")
+    ? visibles.map(f => `<tr><td class="ped-prod"><strong>${escapeHtml(pedidoNombre(f))}</strong>${f.codigo ? `<span class="ped-cod">${escapeHtml(f.codigo)}</span>` : ""}</td>${pedidoCeldaHtml(f, "bello")}${pedidoCeldaHtml(f, "colores")}</tr>`).join("")
     : `<tr class="empty-row"><td colspan="3">${conPedido.length
         ? "Ningún producto coincide con el filtro."
         : "No hay pedido cargado para esta fecha." + (puedeMarcarPedido() ? " Pégalo en Despacho → Importar sugerido." : " Pídele a despacho que lo cargue.")}</td></tr>`;
