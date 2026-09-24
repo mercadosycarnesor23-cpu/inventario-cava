@@ -315,42 +315,50 @@ body.rol-platano .tab-panel:not(#tab-platano) .btn-icon { display: none !importa
 }
 
 /* ---------- Seccion Pedido (estado por producto para Bello y Colores) ---------- */
-.ped-resumen { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 12px; margin-bottom: 14px; }
-.ped-card { border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; background: #fff; }
-.ped-card-titulo { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-weight: 700; margin-bottom: 8px; color: var(--ink); }
-.ped-card-titulo span { font-size: 12.5px; color: var(--muted); font-weight: 600; }
-.ped-barra { height: 10px; border-radius: 999px; background: #eef0f1; overflow: hidden; display: flex; }
+#tab-pedido .panel { padding: 12px 14px; }
+.ped-resumen { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; margin-bottom: 8px; }
+.ped-card { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; background: #fff; }
+.ped-card-titulo { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-weight: 700; font-size: 13px; margin-bottom: 4px; color: var(--ink); }
+.ped-card-titulo span { font-size: 11.5px; color: var(--muted); font-weight: 600; }
+.ped-barra { height: 6px; border-radius: 999px; background: #eef0f1; overflow: hidden; display: flex; }
 .ped-barra i { display: block; height: 100%; }
 .ped-barra .b-despachado { background: var(--verde); }
 .ped-barra .b-falta { background: var(--amarillo); }
 .ped-barra .b-no_hay { background: var(--rojo); }
-.ped-card-detalle { margin-top: 6px; font-size: 12.5px; color: var(--muted); }
+.ped-card-detalle { margin-top: 3px; font-size: 11.5px; color: var(--muted); }
+
+#pedidoChips { gap: 6px; margin-bottom: 6px; }
+#pedidoChips .chip { padding: 3px 10px; font-size: 12px; }
+#pedidoBuscar { margin-bottom: 6px; padding: 6px 10px; font-size: 13px; }
 
 .chip[data-estado="despachado"].active { background: var(--verde); border-color: var(--verde); }
 .chip[data-estado="falta"].active { background: var(--amarillo); border-color: var(--amarillo); color: var(--amarillo-ink); }
 .chip[data-estado="no_hay"].active { background: var(--rojo); border-color: var(--rojo); }
 .chip[data-estado="pendiente"].active { background: var(--muted); border-color: var(--muted); }
 
-.tabla-pedido td { vertical-align: top; padding: 8px 10px; }
-.tabla-pedido .ped-prod strong { display: block; font-size: 14px; }
-.tabla-pedido .ped-cod { font-size: 11.5px; color: var(--muted); }
-.ped-celda { min-width: 150px; }
+.tabla-pedido { width: auto; font-size: 13px; }
+.tabla-pedido th { padding: 4px 10px; }
+.tabla-pedido td { vertical-align: middle; padding: 3px 8px; }
+.ped-prod { max-width: 260px; }
+.ped-prod strong { font-size: 13px; font-weight: 600; }
+.ped-cod { margin-left: 6px; font-size: 11px; color: var(--muted); }
 .ped-celda.ped-despachado { background: var(--verde-claro); }
 .ped-celda.ped-falta { background: var(--amarillo-claro); }
 .ped-celda.ped-no_hay { background: var(--rojo-claro); }
-.ped-cant { font-size: 15px; font-weight: 700; }
-.ped-cant small { font-weight: 600; color: var(--muted); font-size: 11.5px; }
-.ped-estado { display: inline-block; margin-top: 4px; padding: 2px 9px; border-radius: 999px; font-size: 11.5px; font-weight: 700; }
+.ped-linea { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ped-cant { font-size: 13.5px; font-weight: 700; display: inline-block; min-width: 58px; }
+.ped-cant small { font-weight: 600; color: var(--muted); font-size: 11px; }
+.ped-estado { padding: 1px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; }
 .ped-estado-pendiente { background: #eef0f1; color: var(--muted); }
 .ped-estado-despachado { background: var(--verde); color: #fff; }
 .ped-estado-falta { background: var(--amarillo); color: var(--amarillo-ink); }
 .ped-estado-no_hay { background: var(--rojo); color: #fff; }
-.ped-nota { font-size: 12px; color: var(--ink); margin-top: 3px; font-style: italic; }
-.ped-vacio { color: var(--border); font-size: 18px; }
-.ped-botones { display: flex; gap: 6px; margin-top: 8px; }
+.ped-nota { font-size: 11.5px; color: var(--ink); font-style: italic; }
+.ped-vacio { color: var(--border); }
+.ped-botones { display: inline-flex; gap: 3px; }
 .ped-btn {
-  flex: 1; min-width: 40px; padding: 9px 0; border-radius: 8px; border: 2px solid var(--border);
-  background: #fff; font-size: 16px; font-weight: 800; cursor: pointer; line-height: 1; font-family: inherit;
+  width: 28px; height: 26px; padding: 0; border-radius: 6px; border: 1.5px solid var(--border);
+  background: #fff; font-size: 13px; font-weight: 800; cursor: pointer; line-height: 1; font-family: inherit;
 }
 .ped-btn[data-estado="despachado"] { color: var(--verde); border-color: var(--verde); }
 .ped-btn[data-estado="falta"] { color: var(--amarillo-ink); border-color: var(--amarillo); }
@@ -358,17 +366,15 @@ body.rol-platano .tab-panel:not(#tab-platano) .btn-icon { display: none !importa
 .ped-btn.activo[data-estado="despachado"] { background: var(--verde); color: #fff; }
 .ped-btn.activo[data-estado="falta"] { background: var(--amarillo); color: var(--amarillo-ink); }
 .ped-btn.activo[data-estado="no_hay"] { background: var(--rojo); color: #fff; }
-.ped-leyenda { font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
+.ped-leyenda { font-size: 11.5px; color: var(--muted); margin: 0 0 6px; }
 
 @media (max-width: 720px) {
-  .tabla-pedido th, .tabla-pedido td { padding: 6px 4px; }
-  .tabla-pedido .ped-prod { width: 30%; }
-  .tabla-pedido .ped-prod strong { font-size: 13px; word-break: break-word; }
-  .ped-celda { min-width: 0; }
-  .ped-botones { gap: 4px; }
-  .ped-btn { min-width: 0; padding: 9px 0; font-size: 15px; }
-  .ped-cant { font-size: 14px; }
-  .ped-estado { font-size: 11px; padding: 2px 7px; }
+  #tab-pedido .panel { padding: 10px; }
+  .tabla-pedido { width: 100%; }
+  .tabla-pedido th, .tabla-pedido td { padding: 3px 4px; }
+  .ped-prod strong { word-break: break-word; }
+  .ped-cant { min-width: 0; }
+  .ped-btn { width: 26px; }
 }
 
 /* ---------- Hojas de impresion del sugerido ---------- */
