@@ -38,7 +38,6 @@
     <button class="tab-btn" data-tab="despacho">Despacho</button>
     <button class="tab-btn" data-tab="pedido">Pedido</button>
     <button class="tab-btn" data-tab="platano">Plátano</button>
-    <button class="tab-btn" data-tab="historial">Historial</button>
     <button class="tab-btn" data-tab="productos">Productos</button>
     <button class="tab-btn" data-tab="resumen">Resumen</button>
   </nav>
@@ -370,51 +369,6 @@
     </div>
   </section>
 
-  <!-- HISTORIAL -->
-  <section class="tab-panel" id="tab-historial">
-    <div class="panel">
-      <div class="panel-title-row"><h3>Historial de movimientos</h3></div>
-      <div class="filtros-bar">
-        <select id="filtroTipo">
-          <option value="">Todos los tipos</option>
-          <option value="inventario">Inventario</option>
-          <option value="despacho">Despacho</option>
-        </select>
-        <input type="text" id="filtroProductoTexto" placeholder="Filtrar por código o nombre...">
-        <input type="date" id="filtroDesde">
-        <input type="date" id="filtroHasta">
-        <button id="btnFiltrarHistorial" class="btn-ghost">Filtrar</button>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Producto</th><th>Detalle</th><th>Notas</th><th></th></tr></thead>
-          <tbody id="tablaHistorial"></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="panel">
-      <div class="panel-title-row"><h3>Diferencias registradas</h3></div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Fecha</th><th>Producto</th><th>Esperado</th><th>Real</th><th>Diferencia</th><th>Motivo</th><th>Nota</th></tr></thead>
-          <tbody id="tablaDiferencias"></tbody>
-        </table>
-      </div>
-    </div>
-    <div class="panel">
-      <div class="panel-title-row">
-        <h3>Correcciones a inventarios de días anteriores</h3>
-        <span class="hint">Registro de por qué se editó o eliminó un conteo que no era del día.</span>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead><tr><th>Fecha del conteo</th><th>Producto</th><th>Acción</th><th>Antes</th><th>Después</th><th>Motivo</th><th>Nota</th></tr></thead>
-          <tbody id="tablaCorrecciones"></tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
   <!-- PRODUCTOS -->
   <section class="tab-panel" id="tab-productos">
     <div class="panel solo-editor">
@@ -453,38 +407,57 @@
 
   <!-- RESUMEN -->
   <section class="tab-panel" id="tab-resumen">
-    <div class="kpi-grid">
-      <div class="kpi-card kpi-blue">
-        <span class="kpi-label">Productos en catálogo</span>
-        <span class="kpi-value" id="kpiTotalProductos">0</span>
-      </div>
-      <div class="kpi-card kpi-green">
-        <span class="kpi-label">Inventariados hoy</span>
-        <span class="kpi-value" id="kpiInventariadosHoy">0</span>
-      </div>
-      <div class="kpi-card kpi-gold">
-        <span class="kpi-label">Despachados hoy</span>
-        <span class="kpi-value" id="kpiDespachadosHoy">0</span>
-      </div>
-      <div class="kpi-card kpi-danger">
-        <span class="kpi-label">Diferencias hoy</span>
-        <span class="kpi-value" id="kpiDiferenciasHoy">0</span>
-      </div>
-    </div>
     <div class="panel">
-      <h3>Cómo funciona</h3>
-      <ol class="pasos-lista">
-        <li><strong>Inventario</strong> — al final del día se cuenta lo que quedó en la cava (por producto, en kg o unidades) y queda guardado como el stock actual.</li>
-        <li><strong>Despacho</strong> — al día siguiente se reparte ese stock entre Bello, Colores y Puntos Expres. El sistema muestra cuánto había, cuánto se despacha y cuánto queda.</li>
-        <li><strong>Nuevo inventario</strong> — al final de ese día se vuelve a contar. Si el conteo no coincide con lo que debía quedar, el sistema pide un motivo (merma, error de conteo, etc.) y lo deja registrado en el Historial.</li>
-      </ol>
-    </div>
-    <div class="panel">
-      <h3>Últimos movimientos</h3>
-      <div class="table-wrap">
+      <div class="panel-title-row">
+        <h3>Buscar movimientos</h3>
+        <span class="hint">No se muestra nada hasta que busques.</span>
+      </div>
+      <div class="filtro-chip-row" id="resRapidos">
+        <button type="button" class="chip" data-rapido="hoy">Hoy</button>
+        <button type="button" class="chip" data-rapido="ayer">Ayer</button>
+        <button type="button" class="chip" data-rapido="7">Últimos 7 días</button>
+        <button type="button" class="chip" data-rapido="mes">Este mes</button>
+      </div>
+      <div class="filtros-bar res-filtros">
+        <label class="fecha-label">Desde
+          <input type="date" id="resDesde">
+        </label>
+        <label class="fecha-label">Hasta
+          <input type="date" id="resHasta">
+        </label>
+        <label class="fecha-label">Tipo
+          <select id="resTipo">
+            <option value="">Todos</option>
+            <option value="ingreso">Ingreso (inventario)</option>
+            <option value="despacho">Despacho</option>
+            <option value="desperdicio">Desperdicio y diferencias</option>
+            <option value="correccion">Correcciones</option>
+          </select>
+        </label>
+        <label class="fecha-label" id="resDestinoWrap" hidden>Despachado a
+          <select id="resDestino">
+            <option value="">Todos</option>
+            <option value="bello">Bello</option>
+            <option value="colores">Colores</option>
+            <option value="expres">Puntos Expres</option>
+          </select>
+        </label>
+        <label class="fecha-label" id="resMotivoWrap" hidden>Motivo
+          <select id="resMotivo"></select>
+        </label>
+        <label class="fecha-label">Producto
+          <input type="text" id="resTexto" placeholder="Código o nombre...">
+        </label>
+      </div>
+      <div class="form-actions">
+        <button type="button" class="btn-primary" id="btnBuscarResumen">Buscar</button>
+        <button type="button" class="btn-ghost" id="btnLimpiarResumen">Limpiar</button>
+      </div>
+      <p class="ped-leyenda" id="resInfo">Elige los filtros y pulsa Buscar.</p>
+      <div class="table-wrap" id="resTablaWrap" hidden>
         <table>
-          <thead><tr><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Producto</th><th>Detalle</th></tr></thead>
-          <tbody id="resumenUltimos"></tbody>
+          <thead><tr><th>Fecha</th><th>Hora</th><th>Tipo</th><th>Producto</th><th>Detalle</th><th>Notas</th><th></th></tr></thead>
+          <tbody id="resTabla"></tbody>
         </table>
       </div>
     </div>
