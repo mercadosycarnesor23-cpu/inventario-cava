@@ -95,6 +95,9 @@ body {
   cursor: pointer; font-size: 14px; color: var(--muted); font-weight: 600;
 }
 .tab-btn[hidden], .btn-ghost[hidden] { display: none; }
+.fecha-label[hidden] { display: none; }
+.res-filtros { align-items: flex-end; margin-bottom: 8px; }
+#resTexto { min-width: 180px; }
 .tab-btn:hover { background: var(--azul-claro); color: var(--azul-dark); }
 .tab-btn.active { background: var(--azul); color: #fff; }
 
