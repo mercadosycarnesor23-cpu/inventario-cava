@@ -354,10 +354,6 @@ async function refrescarTodo() {
       }
       renderPedido();
     }
-    await renderHistorial();
-    await renderDiferencias();
-    await renderCorrecciones();
-    await renderResumen();
   } catch (err) {
     toast(err.message || "Error cargando datos", true);
   }
@@ -2421,12 +2417,8 @@ setInterval(async () => {
 }, 20000);
 
 /* ==========================================================================
-   HISTORIAL
+   RESUMEN (buscador de movimientos: no muestra datos hasta que se busca)
    ========================================================================== */
-
-["btnFiltrarHistorial"].forEach(id => document.getElementById(id).addEventListener("click", renderHistorial));
-["filtroTipo", "filtroDesde", "filtroHasta"].forEach(id => document.getElementById(id).addEventListener("change", renderHistorial));
-document.getElementById("filtroProductoTexto").addEventListener("input", renderHistorial);
 
 function detalleHistorial(m) {
   const p = productosPorId[m.productoId];
@@ -2437,118 +2429,165 @@ function detalleHistorial(m) {
   return `Bello: ${fmt(m.bello, unidad)} · Colores: ${fmt(m.colores, unidad)} · Expres: ${fmt(m.puntosExpres, unidad)} · Total: <strong>${fmt(m.totalDespachado, unidad)}</strong> · Queda: ${fmt(m.queda, unidad)}`;
 }
 
-async function obtenerHistorialCompleto({ desde, hasta, tipo } = {}) {
-  let invQuery = sb.from("inventarios").select("*");
-  let despQuery = sb.from("despachos").select("*");
-  if (desde) { invQuery = invQuery.gte("fecha", desde); despQuery = despQuery.gte("fecha", desde); }
-  if (hasta) { invQuery = invQuery.lte("fecha", hasta); despQuery = despQuery.lte("fecha", hasta); }
+const RES_LIMITE = 300;
+const RES_ACCION_CORRECCION = { editar: "Editado", sumar: "Sumado", eliminar: "Eliminado" };
+let resItems = [];
+
+function horaDeTimestamp(ts) {
+  if (!ts) return "";
+  const d = new Date(ts);
+  return isNaN(d) ? "" : d.toLocaleTimeString("es-CO", { hour: "2-digit", minute: "2-digit", hour12: false });
+}
+
+function actualizarFiltrosResumen() {
+  const tipo = document.getElementById("resTipo").value;
+  document.getElementById("resDestinoWrap").hidden = tipo !== "despacho";
+  document.getElementById("resMotivoWrap").hidden = tipo !== "desperdicio";
+}
+
+function rangoRapidoResumen(clave) {
+  const hoy = new Date();
+  const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const desplazar = (dias) => { const d = new Date(hoy); d.setDate(d.getDate() + dias); return d; };
+  if (clave === "hoy") return [iso(hoy), iso(hoy)];
+  if (clave === "ayer") return [iso(desplazar(-1)), iso(desplazar(-1))];
+  if (clave === "7") return [iso(desplazar(-6)), iso(hoy)];
+  return [iso(new Date(hoy.getFullYear(), hoy.getMonth(), 1)), iso(hoy)];
+}
+
+// Busca en el servidor solo lo que pide el filtro (nada de traer todo el historial).
+async function buscarMovimientosResumen() {
+  const tipo = document.getElementById("resTipo").value;
+  const desde = document.getElementById("resDesde").value;
+  const hasta = document.getElementById("resHasta").value;
+  const destino = document.getElementById("resDestino").value;
+  const motivo = document.getElementById("resMotivo").value;
+  const texto = document.getElementById("resTexto").value.trim().toLowerCase();
+  if (desde && hasta && desde > hasta) throw new Error("La fecha \"Desde\" no puede ser posterior a \"Hasta\"");
+
+  let ids = null;
+  if (texto) {
+    ids = productos.filter(p => p.codigo.toLowerCase().includes(texto) || p.nombre.toLowerCase().includes(texto)).map(p => p.id);
+    if (!ids.length) return [];
+  }
+  const filtrarEnServidor = ids && ids.length <= 60;
+  const filtrarProducto = (q) => (filtrarEnServidor ? q.in("producto_id", ids) : q);
+  const base = (tabla) => {
+    let q = sb.from(tabla).select("*");
+    if (desde) q = q.gte("fecha", desde);
+    if (hasta) q = q.lte("fecha", hasta);
+    return filtrarProducto(q).order("creado_en", { ascending: false }).limit(filtrarEnServidor || !ids ? RES_LIMITE : 1000);
+  };
 
   const tareas = [];
-  tareas.push(tipo === "despacho" ? Promise.resolve({ data: [] }) : invQuery);
-  tareas.push(tipo === "inventario" ? Promise.resolve({ data: [] }) : despQuery);
-  const [{ data: invs, error: e1 }, { data: desps, error: e2 }] = await Promise.all(tareas);
-  throwIfError(e1); throwIfError(e2);
-
-  const items = [...(invs || []).map(mapInventario), ...(desps || []).map(mapDespacho)];
-  items.sort((a, b) => b.creadoEn.localeCompare(a.creadoEn));
+  if (!tipo || tipo === "ingreso") {
+    tareas.push(base("inventarios").then(({ data, error }) => { throwIfError(error); return (data || []).map(mapInventario); }));
+  }
+  if (!tipo || tipo === "despacho") {
+    let q = base("despachos");
+    if (tipo === "despacho" && destino) q = q.gt(destino === "expres" ? "puntos_expres" : destino, 0);
+    tareas.push(q.then(({ data, error }) => { throwIfError(error); return (data || []).map(mapDespacho); }));
+  }
+  if (!tipo || tipo === "desperdicio") {
+    let q = base("diferencias");
+    if (tipo === "desperdicio" && motivo) q = q.eq("motivo", motivo);
+    tareas.push(q.then(({ data, error }) => { throwIfError(error); return (data || []).map(d => ({ ...mapDiferencia(d), tipo: "diferencia", hora: horaDeTimestamp(d.creado_en) })); }));
+  }
+  if (!tipo || tipo === "correccion") {
+    tareas.push(base("correcciones").then(({ data, error }) => { throwIfError(error); return (data || []).map(c => ({ ...mapCorreccion(c), tipo: "correccion", accion: c.tipo, hora: horaDeTimestamp(c.creado_en) })); }));
+  }
+  let items = (await Promise.all(tareas)).flat();
+  if (ids && !filtrarEnServidor) {
+    const set = new Set(ids);
+    items = items.filter(m => set.has(m.productoId));
+  }
+  items.sort((a, b) => (b.fecha + (b.creadoEn || "")).localeCompare(a.fecha + (a.creadoEn || "")));
   return items;
 }
 
-async function renderHistorial() {
-  const tipo = document.getElementById("filtroTipo").value;
-  const desde = document.getElementById("filtroDesde").value;
-  const hasta = document.getElementById("filtroHasta").value;
-  const texto = document.getElementById("filtroProductoTexto").value.trim().toLowerCase();
+function resFilaHtml(m) {
+  const p = productosPorId[m.productoId];
+  const unidad = p ? p.unidad : "";
+  const producto = p ? escapeHtml(p.codigo + " · " + p.nombre) : "(eliminado)";
+  let etiqueta, detalle, notas, borrar = "";
+  if (m.tipo === "inventario") {
+    etiqueta = "Ingreso"; detalle = detalleHistorial(m); notas = m.notas;
+    borrar = `<button class="btn-icon danger" data-del-res="inventario|${m.id}">✕</button>`;
+  } else if (m.tipo === "despacho") {
+    etiqueta = "Despacho"; detalle = detalleHistorial(m); notas = m.notas;
+    borrar = `<button class="btn-icon danger" data-del-res="despacho|${m.id}">✕</button>`;
+  } else if (m.tipo === "diferencia") {
+    etiqueta = "Desperdicio / diferencia";
+    detalle = `Esperado: ${fmt(m.valorEsperado, unidad)} · Real: ${fmt(m.valorReal, unidad)} · Diferencia: <strong>${m.diferencia > 0 ? "+" : ""}${fmt(m.diferencia, unidad)}</strong> · ${escapeHtml(m.motivo || "-")}`;
+    notas = m.nota;
+  } else {
+    etiqueta = `Corrección (${RES_ACCION_CORRECCION[m.accion] || m.accion})`;
+    detalle = `Antes: ${fmt(m.valorAnterior, unidad)} · Después: ${m.valorNuevo === null || m.valorNuevo === undefined ? "-" : fmt(m.valorNuevo, unidad)} · ${escapeHtml(m.motivo || "-")}`;
+    notas = m.nota;
+  }
+  return `<tr><td>${m.fecha}</td><td>${m.hora || ""}</td><td>${etiqueta}</td><td>${producto}</td><td>${detalle}</td><td>${escapeHtml(notas || "-")}</td><td>${borrar}</td></tr>`;
+}
 
-  let items;
+async function ejecutarBusquedaResumen() {
+  const info = document.getElementById("resInfo");
+  info.textContent = "Buscando...";
   try {
-    items = await obtenerHistorialCompleto({ desde, hasta, tipo: tipo || null });
+    resItems = await buscarMovimientosResumen();
   } catch (err) {
-    toast(err.message || "No se pudo cargar el historial", true);
+    info.textContent = "No se pudo buscar.";
+    toast(err.message || "No se pudo buscar", true);
     return;
   }
-  if (texto) {
-    items = items.filter(m => {
-      const p = productosPorId[m.productoId];
-      return p && (p.codigo.toLowerCase().includes(texto) || p.nombre.toLowerCase().includes(texto));
-    });
+  const total = resItems.length;
+  const visibles = resItems.slice(0, RES_LIMITE);
+  document.getElementById("resTablaWrap").hidden = false;
+  document.getElementById("resTabla").innerHTML = visibles.map(resFilaHtml).join("")
+    || `<tr class="empty-row"><td colspan="7">Sin resultados con estos filtros.</td></tr>`;
+  info.textContent = total > RES_LIMITE
+    ? `Mostrando los ${RES_LIMITE} más recientes de ${total}. Afina los filtros para ver el resto.`
+    : `${total} resultado(s).`;
+}
+
+document.getElementById("resMotivo").innerHTML =
+  `<option value="">Todos</option>` + MOTIVOS.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("");
+document.getElementById("resTipo").addEventListener("change", actualizarFiltrosResumen);
+document.getElementById("btnBuscarResumen").addEventListener("click", ejecutarBusquedaResumen);
+["resTexto"].forEach(id => document.getElementById(id).addEventListener("keydown", (e) => { if (e.key === "Enter") ejecutarBusquedaResumen(); }));
+document.getElementById("btnLimpiarResumen").addEventListener("click", () => {
+  ["resDesde", "resHasta", "resTipo", "resDestino", "resMotivo", "resTexto"].forEach(id => { document.getElementById(id).value = ""; });
+  actualizarFiltrosResumen();
+  resItems = [];
+  document.getElementById("resTablaWrap").hidden = true;
+  document.getElementById("resTabla").innerHTML = "";
+  document.getElementById("resInfo").textContent = "Elige los filtros y pulsa Buscar.";
+});
+document.getElementById("resRapidos").addEventListener("click", (e) => {
+  const chip = e.target.closest(".chip");
+  if (!chip) return;
+  const [desde, hasta] = rangoRapidoResumen(chip.dataset.rapido);
+  document.getElementById("resDesde").value = desde;
+  document.getElementById("resHasta").value = hasta;
+  ejecutarBusquedaResumen();
+});
+document.getElementById("resTabla").addEventListener("click", async (e) => {
+  const btn = e.target.closest("[data-del-res]");
+  if (!btn) return;
+  const [tipoMov, id] = btn.dataset.delRes.split("|");
+  if (tipoMov === "inventario") {
+    await quitarInventario(id);
+    await ejecutarBusquedaResumen();
+    return;
   }
-  items = items.slice(0, 300);
-
-  const tbody = document.getElementById("tablaHistorial");
-  tbody.innerHTML = items.map(m => {
-    const p = productosPorId[m.productoId];
-    return `
-      <tr>
-        <td>${m.fecha}</td>
-        <td>${m.hora || ""}</td>
-        <td>${m.tipo === "inventario" ? "Inventario" : "Despacho"}</td>
-        <td>${p ? escapeHtml(p.codigo + " · " + p.nombre) : "(eliminado)"}</td>
-        <td>${detalleHistorial(m)}</td>
-        <td>${escapeHtml(m.notas || "-")}</td>
-        <td><button class="btn-icon danger" data-del-hist="${m.tipo}|${m.id}">✕</button></td>
-      </tr>
-    `;
-  }).join("") || `<tr class="empty-row"><td colspan="7">Sin movimientos con estos filtros.</td></tr>`;
-
-  tbody.querySelectorAll("[data-del-hist]").forEach(b => b.addEventListener("click", async () => {
-    const [tipoMov, id] = b.dataset.delHist.split("|");
-    if (tipoMov === "inventario") { await quitarInventario(id); return; }
-    if (!confirm("¿Eliminar este movimiento? Solo se puede si es el último registrado para ese producto.")) return;
-    try {
-      await eliminarDespachoCloud(id);
-      toast("Movimiento eliminado");
-      await refrescarTodo();
-    } catch (err) {
-      toast(err.message || "No se pudo eliminar", true);
-    }
-  }));
-}
-
-async function renderDiferencias() {
-  const { data, error } = await sb.from("diferencias").select("*").order("creado_en", { ascending: false }).limit(200);
-  if (error) { toast(error.message, true); return; }
-  const items = (data || []).map(mapDiferencia);
-  const tbody = document.getElementById("tablaDiferencias");
-  tbody.innerHTML = items.map(d => {
-    const p = productosPorId[d.productoId];
-    const unidad = p ? p.unidad : "";
-    return `
-      <tr class="${Math.abs(d.diferencia) > 0 ? 'row-warn' : ''}">
-        <td>${d.fecha}</td>
-        <td>${p ? escapeHtml(p.codigo + " · " + p.nombre) : "(eliminado)"}</td>
-        <td>${fmt(d.valorEsperado, unidad)}</td>
-        <td>${fmt(d.valorReal, unidad)}</td>
-        <td>${d.diferencia > 0 ? "+" : ""}${fmt(d.diferencia, unidad)}</td>
-        <td>${escapeHtml(d.motivo || "-")}</td>
-        <td>${escapeHtml(d.nota || "-")}</td>
-      </tr>
-    `;
-  }).join("") || `<tr class="empty-row"><td colspan="7">Sin diferencias registradas.</td></tr>`;
-}
-
-async function renderCorrecciones() {
-  const { data, error } = await sb.from("correcciones").select("*").order("creado_en", { ascending: false }).limit(200);
-  if (error) { toast(error.message, true); return; }
-  const items = (data || []).map(mapCorreccion);
-  const tbody = document.getElementById("tablaCorrecciones");
-  const ACCION_LABEL = { editar: "Editado", sumar: "Sumado", eliminar: "Eliminado" };
-  tbody.innerHTML = items.map(c => {
-    const p = productosPorId[c.productoId];
-    const unidad = p ? p.unidad : "";
-    return `
-      <tr>
-        <td>${c.fecha}</td>
-        <td>${p ? escapeHtml(p.codigo + " · " + p.nombre) : "(eliminado)"}</td>
-        <td>${ACCION_LABEL[c.tipo] || c.tipo}</td>
-        <td>${fmt(c.valorAnterior, unidad)}</td>
-        <td>${c.valorNuevo === null || c.valorNuevo === undefined ? "-" : fmt(c.valorNuevo, unidad)}</td>
-        <td>${escapeHtml(c.motivo || "-")}</td>
-        <td>${escapeHtml(c.nota || "-")}</td>
-      </tr>
-    `;
-  }).join("") || `<tr class="empty-row"><td colspan="7">Sin correcciones registradas.</td></tr>`;
-}
+  if (!confirm("¿Eliminar este movimiento? Solo se puede si es el último registrado para ese producto.")) return;
+  try {
+    await eliminarDespachoCloud(id);
+    toast("Movimiento eliminado");
+    await refrescarTodo();
+    await ejecutarBusquedaResumen();
+  } catch (err) {
+    toast(err.message || "No se pudo eliminar", true);
+  }
+});
 
 /* ==========================================================================
    PRODUCTOS
@@ -2642,40 +2681,6 @@ async function eliminarProducto(id) {
   } catch (err) {
     toast(err.message || "No se pudo eliminar", true);
   }
-}
-
-/* ==========================================================================
-   RESUMEN
-   ========================================================================== */
-
-async function renderResumen() {
-  document.getElementById("kpiTotalProductos").textContent = productos.length;
-  document.getElementById("kpiInventariadosHoy").textContent = estado.filter(e => e.inventariadoHoy).length;
-  document.getElementById("kpiDespachadosHoy").textContent = estado.filter(e => e.despachadoHoyTotal > 0).length;
-
-  try {
-    const { data: difs, error } = await sb.from("diferencias").select("id").eq("fecha", fechaTrabajo());
-    throwIfError(error);
-    document.getElementById("kpiDiferenciasHoy").textContent = (difs || []).length;
-  } catch (e) { /* no bloquea el resto del resumen */ }
-
-  try {
-    const items = await obtenerHistorialCompleto({});
-    const top = items.slice(0, 10);
-    const tbody = document.getElementById("resumenUltimos");
-    tbody.innerHTML = top.map(m => {
-      const p = productosPorId[m.productoId];
-      return `
-        <tr>
-          <td>${m.fecha}</td>
-          <td>${m.hora || ""}</td>
-          <td>${m.tipo === "inventario" ? "Inventario" : "Despacho"}</td>
-          <td>${p ? escapeHtml(p.codigo + " · " + p.nombre) : "(eliminado)"}</td>
-          <td>${detalleHistorial(m)}</td>
-        </tr>
-      `;
-    }).join("") || `<tr class="empty-row"><td colspan="5">Sin movimientos todavía.</td></tr>`;
-  } catch (e) { /* no bloquea el resto del resumen */ }
 }
 
 /* ==========================================================================
