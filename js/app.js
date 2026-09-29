@@ -2766,9 +2766,19 @@ function cjAddDays(iso, n) {
   d.setDate(d.getDate() + n);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
+// Lee un valor en pesos escrito por el usuario o ya formateado con puntos de
+// miles ("es-CO", p. ej. "231.000"). OJO: el punto ahí es separador de miles,
+// no decimal, así que no se puede usar Number() directo (eso convertía
+// "231.000" en 231). Como la caja siempre maneja pesos enteros, se quita
+// cualquier punto o coma y se toma todo como dígitos.
 function cjNumTexto(v) {
-  const n = Number(String(v ?? "").replace(/[^\d.-]/g, ""));
-  return isNaN(n) ? null : n;
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  const neg = s.trim().startsWith("-");
+  const digitos = s.replace(/[^\d]/g, "");
+  if (!digitos) return null;
+  const n = Number(digitos);
+  return isNaN(n) ? null : (neg ? -n : n);
 }
 
 /* ---------------------------- Cálculos ---------------------------- */
