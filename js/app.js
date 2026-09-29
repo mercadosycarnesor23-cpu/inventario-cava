@@ -76,10 +76,13 @@ function esSoloLecturaPlatano() {
   return rolActual() === "ver";
 }
 function puedeMarcarPedido() {
-  return rolActual() === "editar";
+  const rol = rolActual();
+  return rol === "editar" || rol === "caja";
 }
 // Con la clave de plantano solo se ven estas pestanas (la ultima es la de entrada).
 const TABS_PERMITIDAS = { platano: ["pedido", "platano"] };
+// La pestana "Caja" es la unica que NO sigue la regla de arriba: es exclusiva
+// de la clave de caja (rol "caja"), ni siquiera la clave de edicion total la ve.
 function aplicarRolEnPantalla() {
   const rol = rolActual();
   document.body.classList.toggle("rol-ver", rol === "ver");
@@ -90,13 +93,18 @@ function aplicarRolEnPantalla() {
     badge.textContent = rol === "platano" ? "Solo plátano" : "Solo lectura";
   }
   const permitidas = TABS_PERMITIDAS[rol];
-  document.querySelectorAll(".tab-btn").forEach(b => { b.hidden = !!permitidas && !permitidas.includes(b.dataset.tab); });
+  document.querySelectorAll(".tab-btn").forEach(b => {
+    if (b.dataset.tab === "caja") { b.hidden = rol !== "caja"; return; }
+    b.hidden = !!permitidas && !permitidas.includes(b.dataset.tab);
+  });
   const btnRespaldo = document.getElementById("btnBackup");
   if (btnRespaldo) btnRespaldo.hidden = rol === "platano";
-  if (permitidas) {
-    const activa = document.querySelector(".tab-btn.active");
-    if (!activa || activa.hidden) {
-      const destino = document.querySelector(`.tab-btn[data-tab="${permitidas[permitidas.length - 1]}"]`);
+  const activa = document.querySelector(".tab-btn.active");
+  if (!activa || activa.hidden) {
+    const destino = permitidas
+      ? document.querySelector(`.tab-btn[data-tab="${permitidas[permitidas.length - 1]}"]`)
+      : document.querySelector(".tab-btn:not([hidden])");
+    if (destino) {
       document.querySelectorAll(".tab-btn").forEach(b => b.classList.remove("active"));
       document.querySelectorAll(".tab-panel").forEach(p => p.classList.remove("active"));
       destino.classList.add("active");
@@ -118,6 +126,8 @@ function intentarEntrar() {
     sessionStorage.setItem("inv_rol", "editar");
   } else if (window.APP_PASSWORD_PLATANO && val === window.APP_PASSWORD_PLATANO) {
     sessionStorage.setItem("inv_rol", "platano");
+  } else if (window.APP_PASSWORD_CAJA && val === window.APP_PASSWORD_CAJA) {
+    sessionStorage.setItem("inv_rol", "caja");
   } else if (val === window.APP_PASSWORD_VIEW) {
     sessionStorage.setItem("inv_rol", "ver");
   } else {
@@ -162,6 +172,7 @@ document.getElementById("tabs").addEventListener("click", (e) => {
   actualizarTabActualLabel(btn);
   cerrarMenu();
   if (btn.dataset.tab === "pedido") cargarPedido().then(renderPedido).catch(() => {});
+  if (btn.dataset.tab === "caja") cargarCaja().then(renderCaja).catch(() => {});
   refrescarTodo();
   actualizarBarraScroll();
 });
@@ -353,6 +364,10 @@ async function refrescarTodo() {
         await cargarPedido();
       }
       renderPedido();
+    }
+    if (document.getElementById("tab-caja").classList.contains("active")) {
+      await cargarCaja();
+      renderCaja();
     }
   } catch (err) {
     toast(err.message || "Error cargando datos", true);
@@ -2714,9 +2729,770 @@ document.getElementById("btnBackup").addEventListener("click", async () => {
 });
 
 /* ==========================================================================
+   CAJA MENOR (acceso exclusivo con la clave de Caja; ni la de edición total
+   la ve). Efectivo del día con una BASE que queda en caja de un día a otro.
+   - Movimientos: ENTRADAS (reposición, venta de contado, abonos…) y SALIDAS
+     (gastos menores, fletes, pagos…), cada uno con categoría (cuenta PUC
+     sugerida), tercero, soporte y consecutivo propio: RC-00001 (recibo de
+     caja) / CE-00001 (comprobante de egreso). No se borran: se ANULAN con
+     motivo (queda la huella para auditoría).
+   - Saldo del día = saldo inicial + entradas − salidas. Nunca queda negativo.
+   - CIERRE diario: arqueo por billetes y monedas → diferencia (sobrante o
+     faltante, con justificación) → lo que QUEDA de base para el día
+     siguiente y lo que se ENTREGA.
+   - Los días se cierran en orden; un día cerrado no admite movimientos y
+     solo se puede reabrir el último cierre (con motivo).
+   - Usa la misma "Fecha de trabajo" del encabezado que el resto de la app.
+   ========================================================================== */
+
+const CJ_DENOM = { billetes: [100000, 50000, 20000, 10000, 5000, 2000], monedas: [1000, 500, 200, 100, 50] };
+const CJ_SOPORTES = { factura: "Factura", recibo: "Recibo de caja menor", sin: "Sin soporte" };
+const CJ_TIPO = { entrada: "Entrada", salida: "Salida" };
+
+let cajaConfig = null;     // { fecha_inicio, monto_inicio, base, responsable } | null si no está configurada
+let cajaCats = [];
+let cajaMovs = [];
+let cajaCierres = {};      // { [fecha]: fila de caja_cierres }
+let cajaReaperturas = [];
+let cajaError = "";
+const CJ = { vista: "dia", tipo: "salida", editId: null, arqueo: {}, mes: "", desde: "", hasta: "" };
+
+function cjMoney(n) {
+  const v = Math.round(Number(n) || 0);
+  return (v < 0 ? "-$" : "$") + Math.abs(v).toLocaleString("es-CO");
+}
+function cjAddDays(iso, n) {
+  const d = new Date(iso + "T12:00:00");
+  d.setDate(d.getDate() + n);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function cjNumTexto(v) {
+  const n = Number(String(v ?? "").replace(/[^\d.-]/g, ""));
+  return isNaN(n) ? null : n;
+}
+
+/* ---------------------------- Cálculos ---------------------------- */
+function cjNum(m) { return `${m.tipo === "entrada" ? "RC" : "CE"}-${String(m.numero).padStart(5, "0")}`; }
+function cjCat(id) { return cajaCats.find(k => k.id === id); }
+function cjSigno(m) { return m.tipo === "entrada" ? Number(m.valor) : -Number(m.valor); }
+function cjFechasCierre() { return Object.keys(cajaCierres).sort(); }
+function cjUltimoCierre() { const f = cjFechasCierre(); return f.length ? cajaCierres[f[f.length - 1]] : null; }
+function cjMovsDia(f) {
+  return cajaMovs.filter(m => m.fecha === f)
+    .sort((a, b) => (a.hora || "").localeCompare(b.hora || "") || (a.creado_en || "").localeCompare(b.creado_en || ""));
+}
+function cjTotales(f) {
+  let e = 0, s = 0;
+  for (const m of cajaMovs) if (m.fecha === f && !m.anulado_en) { if (m.tipo === "entrada") e += Number(m.valor); else s += Number(m.valor); }
+  return { e, s };
+}
+// Saldo con que abre el día f: lo que quedó en el último cierre anterior (o la
+// base inicial si no hay ninguno) más los movimientos de los días sin cerrar
+// que haya en medio.
+function cjSaldoInicial(f) {
+  if (!cajaConfig) return 0;
+  let desde = cajaConfig.fecha_inicio, saldo = Number(cajaConfig.monto_inicio);
+  const antes = cjFechasCierre().filter(d => d < f);
+  if (antes.length) { const u = antes[antes.length - 1]; saldo = Number(cajaCierres[u].queda); desde = cjAddDays(u, 1); }
+  for (const m of cajaMovs) if (!m.anulado_en && m.fecha >= desde && m.fecha < f) saldo += cjSigno(m);
+  return saldo;
+}
+function cjResumen(f) {
+  const ini = cjSaldoInicial(f), { e, s } = cjTotales(f);
+  return { ini, e, s, saldo: ini + e - s };
+}
+// Días en que se puede registrar: después del último cierre, desde el inicio y hasta hoy.
+function cjBloqueo(f) {
+  const u = cjUltimoCierre();
+  if (!cajaConfig) return "La caja aún no está configurada.";
+  if (f < cajaConfig.fecha_inicio) return `La caja empezó el ${fechaExcel(cajaConfig.fecha_inicio)}.`;
+  if (f > todayISO()) return "No se registran movimientos en fechas futuras.";
+  if (cajaCierres[f]) return "Este día ya está cerrado.";
+  if (u && f < u.fecha) return `Ya hay un cierre posterior (${fechaExcel(u.fecha)}): este día quedó bloqueado.`;
+  return "";
+}
+// Días con movimientos que no se han cerrado (antes de f; por defecto antes de hoy).
+function cjDiasSinCerrar(antesDe = todayISO()) {
+  const u = cjUltimoCierre()?.fecha || "";
+  return [...new Set(cajaMovs.filter(m => !m.anulado_en && m.fecha > u && m.fecha < antesDe).map(m => m.fecha))].sort();
+}
+function cjSiguienteNumero(tipo) {
+  return cajaMovs.filter(m => m.tipo === tipo).reduce((mx, m) => Math.max(mx, Number(m.numero) || 0), 0) + 1;
+}
+function cjSiguienteCierre() {
+  const nums = Object.values(cajaCierres).map(c => Number(c.numero) || 0);
+  return (nums.length ? Math.max(...nums) : 0) + 1;
+}
+
+// Valor en letras (pesos colombianos) para los comprobantes impresos.
+function cjEnLetras(n) {
+  n = Math.round(Math.abs(n || 0));
+  if (!n) return "CERO PESOS M/CTE";
+  const U = ["", "UN", "DOS", "TRES", "CUATRO", "CINCO", "SEIS", "SIETE", "OCHO", "NUEVE", "DIEZ", "ONCE", "DOCE", "TRECE", "CATORCE", "QUINCE",
+    "DIECISÉIS", "DIECISIETE", "DIECIOCHO", "DIECINUEVE", "VEINTE", "VEINTIÚN", "VEINTIDÓS", "VEINTITRÉS", "VEINTICUATRO", "VEINTICINCO",
+    "VEINTISÉIS", "VEINTISIETE", "VEINTIOCHO", "VEINTINUEVE"];
+  const D = ["", "", "", "TREINTA", "CUARENTA", "CINCUENTA", "SESENTA", "SETENTA", "OCHENTA", "NOVENTA"];
+  const C = ["", "CIENTO", "DOSCIENTOS", "TRESCIENTOS", "CUATROCIENTOS", "QUINIENTOS", "SEISCIENTOS", "SETECIENTOS", "OCHOCIENTOS", "NOVECIENTOS"];
+  const cien = x => {
+    if (!x) return "";
+    if (x === 100) return "CIEN";
+    const r = x % 100;
+    const dec = r < 30 ? U[r] : D[Math.floor(r / 10)] + (r % 10 ? " Y " + U[r % 10] : "");
+    return [C[Math.floor(x / 100)], dec].filter(Boolean).join(" ");
+  };
+  const mm = Math.floor(n / 1e6), mil = Math.floor((n % 1e6) / 1000), resto = n % 1000;
+  const p = [];
+  if (mm) p.push(mm === 1 ? "UN MILLÓN" : cien(mm) + " MILLONES");
+  if (mil) p.push(mil === 1 ? "MIL" : cien(mil) + " MIL");
+  if (resto) p.push(cien(resto));
+  return p.join(" ") + (mm && !mil && !resto ? " DE PESOS" : " PESOS") + " M/CTE";
+}
+
+/* ---------------------------- Carga de datos ---------------------------- */
+async function cargarCaja() {
+  try {
+    const [{ data: cfgRows, error: e0 }, { data: cats, error: e1 }, { data: movs, error: e2 }, { data: cierres, error: e3 }, { data: reap, error: e4 }] = await Promise.all([
+      sb.from("caja_config").select("*"),
+      sb.from("caja_categorias").select("*").order("orden"),
+      sb.from("caja_movimientos").select("*"),
+      sb.from("caja_cierres").select("*"),
+      sb.from("caja_reaperturas").select("*").order("creado_en", { ascending: false }),
+    ]);
+    const err = e0 || e1 || e2 || e3 || e4;
+    if (err) throw new Error(err.message || "Error");
+    cajaError = "";
+    cajaConfig = (cfgRows && cfgRows[0]) || null;
+    cajaCats = cats || [];
+    cajaMovs = movs || [];
+    cajaCierres = {};
+    (cierres || []).forEach(c => { cajaCierres[c.fecha] = c; });
+    cajaReaperturas = reap || [];
+  } catch (err) {
+    cajaError = "Esta sección todavía no está activada (falta crear las tablas en Supabase: migration_v11.sql).";
+  }
+}
+
+/* ---------------------------- Render ---------------------------- */
+function renderCaja() {
+  document.querySelectorAll("#cjSeg .chip").forEach(b => b.classList.toggle("active", b.dataset.cjv === CJ.vista));
+  const cont = document.getElementById("cjContenido");
+  if (cajaError) { cont.innerHTML = `<div class="panel"><p class="hint">${escapeHtml(cajaError)}</p></div>`; return; }
+  if (!cajaConfig && CJ.vista !== "ajustes") cont.innerHTML = cjSetupHTML();
+  else if (CJ.vista === "cierres") cont.innerHTML = cjCierresHTML();
+  else if (CJ.vista === "reporte") cont.innerHTML = cjReporteHTML();
+  else if (CJ.vista === "ajustes") cont.innerHTML = cjAjustesHTML();
+  else cont.innerHTML = cjDiaHTML();
+}
+
+/* ---------------------------- Configuración inicial ---------------------------- */
+function cjSetupHTML() {
+  return `<div class="panel">
+    <div class="panel-title-row"><h3>Configurar la caja menor</h3></div>
+    <p class="hint">Escribe con cuánto efectivo arranca la caja (la <b>base</b>) y desde qué día. Cada día se cierra con un arqueo; la base queda en caja para el día siguiente y el resto se entrega.</p>
+    <form id="cjSetupForm" class="form-grid">
+      <label>Base inicial (efectivo en caja)<input id="cjSetupMonto" inputmode="numeric" placeholder="$ 0" required></label>
+      <label>Desde el día<input type="date" id="cjSetupFecha" value="${todayISO()}" max="${todayISO()}"></label>
+      <label>Base que queda cada día<input id="cjSetupBase" inputmode="numeric" placeholder="Igual a la base inicial"></label>
+      <div class="form-actions full"><button class="btn-primary">Empezar caja menor</button></div>
+    </form>
+  </div>`;
+}
+
+/* ---------------------------- Vista del día ---------------------------- */
+function cjDiaHTML() {
+  const f = fechaTrabajo(), r = cjResumen(f), cierre = cajaCierres[f], bloq = cjBloqueo(f);
+  const pend = cjDiasSinCerrar(f);
+  const movs = cjMovsDia(f);
+  const nEntradas = movs.filter(m => !m.anulado_en && m.tipo === "entrada").length;
+  const nSalidas = movs.filter(m => !m.anulado_en && m.tipo === "salida").length;
+  const aviso = pend.length
+    ? `<div class="alerta-box">⚠ ${pend.length === 1 ? `El <b>${fechaExcel(pend[0])}</b> no se ha cerrado` : `Hay <b>${pend.length}</b> días sin cerrar (${pend.map(fechaExcel).join(", ")})`}. Los días se cierran en orden.<br>
+        <button type="button" class="btn-ghost" data-cjir="${pend[0]}" style="margin-top:6px">Ir a cerrar el ${fechaExcel(pend[0])}</button></div>`
+    : "";
+  return `
+    <div class="kpi-grid">
+      <div class="kpi-card kpi-blue"><span class="kpi-label">Saldo inicial · ${fechaExcel(f)}</span><span class="kpi-value">${cjMoney(r.ini)}</span><span class="kpi-sub">${cjInicioTxt(f)}</span></div>
+      <div class="kpi-card kpi-green"><span class="kpi-label">+ Entradas</span><span class="kpi-value">${cjMoney(r.e)}</span><span class="kpi-sub">${nEntradas} movimiento(s)</span></div>
+      <div class="kpi-card kpi-danger"><span class="kpi-label">− Salidas</span><span class="kpi-value">${cjMoney(r.s)}</span><span class="kpi-sub">${nSalidas} movimiento(s)</span></div>
+      <div class="kpi-card kpi-gold"><span class="kpi-label">${cierre ? "Contado al cierre" : "= Debe haber en caja"}</span><span class="kpi-value">${cjMoney(cierre ? cierre.contado : r.saldo)}</span><span class="kpi-sub">${cierre ? `Cierre N° ${cierre.numero} · queda ${cjMoney(cierre.queda)}` : "Según movimientos"}</span></div>
+    </div>
+    ${aviso}
+    <div class="panel">
+      <div class="panel-title-row"><h3>Movimientos del ${fechaExcel(f)}</h3><span class="badge ${cierre ? "badge-off" : bloq ? "badge-warn" : "badge-ok"}">${cierre ? "🔒 Cerrado" : bloq ? "Bloqueado" : "Caja abierta"}</span></div>
+      ${cjFormHTML(f, bloq)}
+      ${cjTablaMovsHTML(f, movs, r, cierre)}
+    </div>
+    <div class="panel">${cjCierreHTML(f, r, cierre, bloq, pend)}</div>`;
+}
+function cjInicioTxt(f) {
+  const antes = cjFechasCierre().filter(d => d < f);
+  if (antes.length) return `quedó del cierre del ${fechaExcel(antes[antes.length - 1])}`;
+  return f === cajaConfig.fecha_inicio ? "base inicial" : "desde la base inicial";
+}
+function cjFormHTML(f, bloq) {
+  const ed = CJ.editId && cajaMovs.find(m => m.id === CJ.editId);
+  const tipo = ed ? ed.tipo : CJ.tipo;
+  if (bloq && !ed) return `<div class="alerta-box">🔒 ${escapeHtml(bloq)}${cajaCierres[f] ? " Para corregir, reabre el cierre (más abajo)." : ""}</div>`;
+  const cats = cajaCats.filter(k => k.tipo === tipo);
+  const terceros = [...new Set(cajaMovs.map(m => m.tercero).filter(Boolean))].sort((a, b) => a.localeCompare(b, "es"));
+  return `<form id="cjForm" class="form-grid" autocomplete="off" style="margin-bottom:16px">
+    <div class="form-actions full" style="justify-content:space-between">
+      <b>${ed ? `Editando ${cjNum(ed)}` : "Registrar movimiento"}</b>
+      <span class="filtro-chip-row" style="margin:0">
+        <button type="button" class="chip${tipo === "salida" ? " active" : ""}" data-cjtipo="salida"${ed ? " disabled" : ""}>− Salida</button>
+        <button type="button" class="chip${tipo === "entrada" ? " active" : ""}" data-cjtipo="entrada"${ed ? " disabled" : ""}>+ Entrada</button>
+      </span>
+    </div>
+    <label>Categoría<select id="cjCat">${cats.map(k => `<option value="${k.id}"${ed?.categoria_id === k.id ? " selected" : ""}>${escapeHtml(k.nombre)}</option>`).join("")}</select></label>
+    <label class="full">Concepto / detalle<input id="cjConcepto" value="${escapeHtml(ed?.concepto || "")}" placeholder="${tipo === "salida" ? "¿En qué se gastó?" : "¿De dónde entra el dinero?"}" required></label>
+    <label>${tipo === "salida" ? "Pagado a" : "Recibido de"}<input id="cjTercero" list="cjTerceros" value="${escapeHtml(ed?.tercero || "")}" placeholder="Nombre"></label>
+    <datalist id="cjTerceros">${terceros.map(t => `<option value="${escapeHtml(t)}">`).join("")}</datalist>
+    <label>NIT / C.C.<input id="cjNit" value="${escapeHtml(ed?.nit || "")}" placeholder="Opcional"></label>
+    <label>Soporte<select id="cjSoporte">${Object.entries(CJ_SOPORTES).map(([k, v]) => `<option value="${k}"${(ed?.soporte || "recibo") === k ? " selected" : ""}>${v}</option>`).join("")}</select></label>
+    <label>N° factura / soporte<input id="cjSoporteN" value="${escapeHtml(ed?.soporte_n || "")}" placeholder="Opcional"></label>
+    <label>Valor<input id="cjValor" inputmode="numeric" value="${ed ? Math.round(ed.valor).toLocaleString("es-CO") : ""}" placeholder="$ 0" required></label>
+    <div class="form-actions full">
+      <button class="btn-primary">${ed ? "Guardar cambios" : tipo === "salida" ? "Registrar salida" : "Registrar entrada"}</button>
+      ${ed ? `<button type="button" class="btn-ghost" id="cjCancelar">Cancelar</button>` : ""}
+      <span class="hint">El saldo nunca queda negativo</span>
+    </div>
+  </form>`;
+}
+function cjTablaMovsHTML(f, movs, r, cierre) {
+  let saldo = r.ini;
+  const filas = movs.map(m => {
+    if (!m.anulado_en) saldo += cjSigno(m);
+    const k = cjCat(m.categoria_id);
+    return `<tr class="${m.anulado_en ? "cj-anulado" : ""}">
+      <td class="cod">${cjNum(m)}</td>
+      <td>${escapeHtml(m.hora || "")}</td>
+      <td><b>${escapeHtml(m.concepto)}</b><div class="hint">${escapeHtml(k?.nombre || "—")}${k?.cuenta ? " · " + escapeHtml(k.cuenta) : ""}${m.anulado_en ? ` · <span class="cj-anulado-txt">Anulado: ${escapeHtml(m.anulado_motivo || "")}</span>` : ""}</div></td>
+      <td>${escapeHtml(m.tercero || "—")}${m.nit ? `<div class="hint">${escapeHtml(m.nit)}</div>` : ""}</td>
+      <td>${m.soporte === "sin" ? "Sin soporte" : `${escapeHtml(CJ_SOPORTES[m.soporte] || "")}${m.soporte_n ? " " + escapeHtml(m.soporte_n) : ""}`}</td>
+      <td class="num cj-e">${m.tipo === "entrada" ? cjMoney(m.valor) : ""}</td>
+      <td class="num cj-s">${m.tipo === "salida" ? cjMoney(m.valor) : ""}</td>
+      <td class="num">${m.anulado_en ? "" : `<b>${cjMoney(saldo)}</b>`}</td>
+      <td class="cj-acc">
+        <button type="button" class="btn-icon" data-cjprint="${m.id}" title="Imprimir">🖨</button>
+        ${!cierre && !m.anulado_en ? `<button type="button" class="btn-icon" data-cjedit="${m.id}" title="Corregir">✎</button><button type="button" class="btn-icon danger" data-cjanular="${m.id}" title="Anular">⊘</button>` : ""}
+      </td>
+    </tr>`;
+  }).join("");
+  return `<div class="table-wrap"><table class="cj-tabla">
+    <thead><tr><th>N°</th><th>Hora</th><th>Concepto</th><th>Tercero</th><th>Soporte</th><th class="num">Entrada</th><th class="num">Salida</th><th class="num">Saldo</th><th></th></tr></thead>
+    <tbody>
+      <tr class="cj-fila-tot"><td colspan="7">Saldo inicial</td><td class="num"><b>${cjMoney(r.ini)}</b></td><td></td></tr>
+      ${filas || `<tr class="empty-row"><td colspan="9">Sin movimientos este día.</td></tr>`}
+      ${cierre ? `
+        <tr class="cj-fila-tot"><td colspan="7">Contado en el arqueo${cierre.diferencia ? ` · ${Number(cierre.diferencia) < 0 ? "faltante" : "sobrante"} ${cjMoney(Math.abs(cierre.diferencia))}` : ""}</td><td class="num"><b>${cjMoney(cierre.contado)}</b></td><td></td></tr>
+        <tr><td colspan="6">Entrega al cierre</td><td class="num cj-s">${cjMoney(cierre.entrega)}</td><td></td><td></td></tr>
+        <tr class="cj-fila-tot"><td colspan="7">Queda en caja para el día siguiente</td><td class="num"><b>${cjMoney(cierre.queda)}</b></td><td></td></tr>` : ""}
+    </tbody></table></div>`;
+}
+
+/* ---------------------------- Cierre y arqueo ---------------------------- */
+function cjArqueo(f) { return (CJ.arqueo[f] ||= { den: {}, queda: "", resp: cajaConfig?.responsable || "", nota: "" }); }
+function cjContado(a) { return [...CJ_DENOM.billetes, ...CJ_DENOM.monedas].reduce((s, d) => s + d * (parseInt(a.den[d]) || 0), 0); }
+function cjCierreHTML(f, r, cierre, bloq, pend) {
+  if (cierre) {
+    const ultimo = cjUltimoCierre()?.fecha === f;
+    return `<div class="panel-title-row"><h3>🔒 Cierre N° ${cierre.numero}</h3><span class="hint">${new Date(cierre.creado_en).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" })}</span></div>
+      ${cjCuadroHTML(cierre)}
+      ${cierre.nota ? `<p class="hint"><b>Observación:</b> ${escapeHtml(cierre.nota)}</p>` : ""}
+      <p class="hint">Responsable: <b>${escapeHtml(cierre.responsable || "—")}</b></p>
+      <div class="form-actions">
+        <button type="button" class="btn-primary" data-cjprintcierre="${f}">🖨 Imprimir cierre</button>
+        ${ultimo ? `<button type="button" class="btn-ghost" data-cjreabrir="${f}">Reabrir</button>` : `<span class="hint">Solo se puede reabrir el último cierre.</span>`}
+      </div>`;
+  }
+  if (bloq) return `<div class="panel-title-row"><h3>Cierre de caja</h3></div><p class="hint">${escapeHtml(bloq)}</p>`;
+  if (pend.length) return `<div class="panel-title-row"><h3>Cierre del ${fechaExcel(f)}</h3></div><p class="hint">Primero cierra el ${fechaExcel(pend[0])}: los días se cierran en orden para que la base de cada día cuadre.</p><button type="button" class="btn-ghost" data-cjir="${pend[0]}">Ir al ${fechaExcel(pend[0])}</button>`;
+  const a = cjArqueo(f), contado = cjContado(a), dif = contado - r.saldo;
+  const base = cajaConfig.base ?? cajaConfig.monto_inicio;
+  const queda = a.queda === "" ? Math.min(base, contado) : (cjNumTexto(a.queda) || 0);
+  const fila = (d) => `<tr><td>${cjMoney(d)}</td><td><input class="cj-den" data-cjden="${d}" inputmode="numeric" value="${escapeHtml(a.den[d] ?? "")}" placeholder="0"></td><td class="num" data-cjsub="${d}">${(parseInt(a.den[d]) || 0) ? cjMoney(d * parseInt(a.den[d])) : ""}</td></tr>`;
+  return `<div class="panel-title-row"><h3>Cierre del ${fechaExcel(f)}</h3><span class="hint">Arqueo: cuenta el efectivo</span></div>
+    <div class="table-wrap"><table class="cj-arqueo">
+      <thead><tr><th>Billetes</th><th>Cantidad</th><th class="num">Subtotal</th></tr></thead>
+      <tbody>${CJ_DENOM.billetes.map(fila).join("")}</tbody>
+      <thead><tr><th>Monedas</th><th></th><th></th></tr></thead>
+      <tbody>${CJ_DENOM.monedas.map(fila).join("")}</tbody>
+    </table></div>
+    <div id="cjCuadro">${cjCuadroHTML({ inicial: r.ini, entradas: r.e, salidas: r.s, esperado: r.saldo, contado, diferencia: dif, entrega: contado - queda, queda })}</div>
+    <div class="form-grid" style="margin-top:10px">
+      <label>Queda de base para el día siguiente<input id="cjQueda" inputmode="numeric" value="${a.queda === "" ? "" : escapeHtml(a.queda)}" placeholder="${cjMoney(Math.min(base, contado))} (base ${cjMoney(base)})"></label>
+      <label>Responsable de caja<input id="cjResp" value="${escapeHtml(a.resp)}" placeholder="Quién entrega la caja"></label>
+      <label class="full">Observaciones <span class="hint" id="cjNotaReq">${Math.abs(dif) >= 1 ? "(obligatorio: explica la diferencia)" : "(opcional)"}</span><input id="cjNota" value="${escapeHtml(a.nota)}" placeholder="Ej.: faltante por vueltas mal dadas"></label>
+    </div>
+    <div class="form-actions"><button type="button" class="btn-primary" id="cjCerrar">🔒 Cerrar caja del ${fechaExcel(f)}</button></div>`;
+}
+function cjCuadroHTML(x) {
+  const dif = Number(x.diferencia), base = cajaConfig.base ?? cajaConfig.monto_inicio ?? 0;
+  const falta = x.queda < base ? base - x.queda : 0;
+  return `<div class="cj-cuadro">
+    <div><span>Saldo inicial</span><b>${cjMoney(x.inicial)}</b></div>
+    <div><span>+ Entradas</span><b class="cj-e">${cjMoney(x.entradas)}</b></div>
+    <div><span>− Salidas</span><b class="cj-s">${cjMoney(x.salidas)}</b></div>
+    <div class="cj-tot"><span>= Debe haber</span><b>${cjMoney(x.esperado)}</b></div>
+    <div class="cj-tot"><span>Contado</span><b>${cjMoney(x.contado)}</b></div>
+    <div class="cj-dif ${Math.abs(dif) < 1 ? "ok" : dif < 0 ? "falta" : "sobra"}"><span>${Math.abs(dif) < 1 ? "Diferencia" : dif < 0 ? "Faltante" : "Sobrante"}</span><b>${Math.abs(dif) < 1 ? "✓ Cuadra" : cjMoney(Math.abs(dif))}</b></div>
+    <div><span>Entrega (se retira)</span><b>${cjMoney(x.entrega)}</b></div>
+    <div class="cj-tot"><span>Queda en caja</span><b>${cjMoney(x.queda)}</b></div>
+    ${falta ? `<div class="alerta-box">Faltan ${cjMoney(falta)} para completar la base de ${cjMoney(base)}: registra una <b>reposición de caja</b>.</div>` : ""}
+  </div>`;
+}
+// Repinta solo el cuadro del arqueo (sin perder el foco de las casillas).
+function cjActualizarCuadro() {
+  const f = fechaTrabajo(), r = cjResumen(f), a = cjArqueo(f), contado = cjContado(a);
+  const base = cajaConfig.base ?? cajaConfig.monto_inicio;
+  const queda = a.queda === "" ? Math.min(base, contado) : (cjNumTexto(a.queda) || 0);
+  document.getElementById("cjCuadro").innerHTML = cjCuadroHTML({ inicial: r.ini, entradas: r.e, salidas: r.s, esperado: r.saldo, contado, diferencia: contado - r.saldo, entrega: contado - queda, queda });
+  document.querySelectorAll("[data-cjsub]").forEach(td => { const d = +td.dataset.cjsub, q = parseInt(a.den[d]) || 0; td.textContent = q ? cjMoney(d * q) : ""; });
+  document.getElementById("cjQueda").placeholder = `${cjMoney(Math.min(base, contado))} (base ${cjMoney(base)})`;
+  document.getElementById("cjNotaReq").textContent = Math.abs(contado - r.saldo) >= 1 ? "(obligatorio: explica la diferencia)" : "(opcional)";
+}
+async function cjCerrarDia() {
+  const f = fechaTrabajo(), r = cjResumen(f), a = cjArqueo(f), contado = cjContado(a), dif = contado - r.saldo;
+  const bloq = cjBloqueo(f);
+  if (bloq) { toast(bloq, true); return; }
+  if (cjDiasSinCerrar(f).length) { toast("Primero cierra los días anteriores.", true); return; }
+  const base = cajaConfig.base ?? cajaConfig.monto_inicio;
+  const queda = a.queda === "" ? Math.min(base, contado) : cjNumTexto(a.queda);
+  if (queda == null || queda < 0) { toast("Revisa lo que queda de base.", true); document.getElementById("cjQueda").focus(); return; }
+  if (queda > contado) { toast(`No puede quedar más de lo contado (${cjMoney(contado)}).`, true); document.getElementById("cjQueda").focus(); return; }
+  if (Math.abs(dif) >= 1 && !a.nota.trim()) { toast(`Hay un ${dif < 0 ? "faltante" : "sobrante"} de ${cjMoney(Math.abs(dif))}: escribe la observación.`, true); document.getElementById("cjNota").focus(); return; }
+  if (!a.resp.trim()) { toast("Escribe el responsable de caja.", true); document.getElementById("cjResp").focus(); return; }
+  const msg = `¿Cerrar la caja del ${fechaExcel(f)}?\n\nDebe haber: ${cjMoney(r.saldo)}\nContado: ${cjMoney(contado)}\n${Math.abs(dif) >= 1 ? (dif < 0 ? "Faltante" : "Sobrante") + ": " + cjMoney(Math.abs(dif)) + "\n" : ""}Se entrega: ${cjMoney(contado - queda)}\nQueda en caja: ${cjMoney(queda)}\n\nDespués del cierre este día no admite movimientos (se puede reabrir si es el último cierre).`;
+  if (!confirm(msg)) return;
+  const cierre = {
+    fecha: f, numero: cjSiguienteCierre(), inicial: r.ini, entradas: r.e, salidas: r.s, esperado: r.saldo,
+    arqueo: Object.fromEntries(Object.entries(a.den).filter(([, q]) => parseInt(q) > 0).map(([d, q]) => [d, parseInt(q)])),
+    contado, diferencia: dif, queda, entrega: contado - queda, responsable: a.resp.trim(), nota: a.nota.trim(),
+  };
+  try {
+    const { error } = await sb.from("caja_cierres").insert(cierre);
+    throwIfError(error);
+    await sb.from("caja_config").update({ responsable: cierre.responsable, actualizado_en: new Date().toISOString() }).eq("id", true);
+    delete CJ.arqueo[f];
+    toast(`🔒 Caja del ${fechaExcel(f)} cerrada · queda ${cjMoney(queda)}${cierre.entrega ? " · entrega " + cjMoney(cierre.entrega) : ""}`);
+    await cargarCaja();
+    renderCaja();
+  } catch (err) {
+    toast(err.message || "No se pudo cerrar la caja", true);
+  }
+}
+function cjReabrir(f) {
+  const c = cajaCierres[f];
+  if (!c || cjUltimoCierre()?.fecha !== f) { toast("Solo se puede reabrir el último cierre.", true); return; }
+  abrirModal(`¿Reabrir la caja del ${fechaExcel(f)}?`, `
+    <div class="modal-body-grid">
+      <div class="alerta-box">El cierre N° ${c.numero} se anula y el día vuelve a admitir movimientos. Queda registrado.</div>
+      <label>Motivo<input type="text" id="cjMotivoReabrir" placeholder="¿Por qué se reabre?"></label>
+    </div>
+  `, {
+    textoConfirmar: "Sí, reabrir",
+    onConfirm: async () => {
+      const motivo = document.getElementById("cjMotivoReabrir").value.trim();
+      if (!motivo) { toast("Escribe el motivo para reabrir.", true); return; }
+      try {
+        await sb.from("caja_reaperturas").insert({ fecha: f, motivo, cierre_anterior: c });
+        const { error } = await sb.from("caja_cierres").delete().eq("fecha", f);
+        throwIfError(error);
+        cerrarModal();
+        CJ.arqueo[f] = { den: Object.fromEntries(Object.entries(c.arqueo || {}).map(([d, q]) => [d, String(q)])), queda: String(c.queda), resp: c.responsable || "", nota: c.nota || "" };
+        toast(`Caja del ${fechaExcel(f)} reabierta`);
+        await cargarCaja();
+        renderCaja();
+      } catch (err) {
+        toast(err.message || "No se pudo reabrir", true);
+      }
+    },
+  });
+  document.getElementById("cjMotivoReabrir").focus();
+}
+
+/* ---------------------------- Registrar / corregir / anular ---------------------------- */
+async function cjGuardarMov() {
+  const f = fechaTrabajo();
+  const ed = CJ.editId && cajaMovs.find(m => m.id === CJ.editId);
+  const bloq = cjBloqueo(ed ? ed.fecha : f);
+  if (bloq) { toast(bloq, true); return; }
+  const tipo = ed ? ed.tipo : CJ.tipo;
+  const valor = Math.round(cjNumTexto(document.getElementById("cjValor").value) || 0);
+  const concepto = document.getElementById("cjConcepto").value.trim();
+  if (!concepto) { toast("Escribe el concepto.", true); document.getElementById("cjConcepto").focus(); return; }
+  if (!(valor > 0)) { toast("Escribe un valor mayor a cero.", true); document.getElementById("cjValor").focus(); return; }
+  const saldoSin = cjResumen(f).saldo - (ed && !ed.anulado_en ? cjSigno(ed) : 0);
+  if (tipo === "salida" && valor > saldoSin) {
+    toast(`No hay suficiente efectivo: en caja hay ${cjMoney(saldoSin)}. Registra primero una reposición.`, true);
+    document.getElementById("cjValor").focus(); return;
+  }
+  const datos = {
+    categoria_id: document.getElementById("cjCat").value || null,
+    concepto,
+    tercero: document.getElementById("cjTercero").value.trim() || null,
+    nit: document.getElementById("cjNit").value.trim() || null,
+    soporte: document.getElementById("cjSoporte").value,
+    soporte_n: document.getElementById("cjSoporteN").value.trim() || null,
+    valor, actualizado_en: new Date().toISOString(),
+  };
+  try {
+    if (ed) {
+      const { error } = await sb.from("caja_movimientos").update(datos).eq("id", ed.id);
+      throwIfError(error);
+      CJ.editId = null;
+      toast(`${cjNum(ed)} corregido`);
+    } else {
+      const numero = cjSiguienteNumero(tipo);
+      const { error } = await sb.from("caja_movimientos").insert({ ...datos, tipo, fecha: f, hora: horaActual(), numero });
+      throwIfError(error);
+      toast(`${tipo === "entrada" ? "RC" : "CE"}-${String(numero).padStart(5, "0")} · ${tipo === "entrada" ? "entrada" : "salida"} de ${cjMoney(valor)} registrada`);
+    }
+    await cargarCaja();
+    renderCaja();
+    setTimeout(() => document.getElementById("cjConcepto")?.focus(), 30);
+  } catch (err) {
+    toast(err.message || "No se pudo guardar el movimiento", true);
+  }
+}
+function cjAnular(m) {
+  abrirModal(`¿Anular ${cjNum(m)}?`, `
+    <div class="modal-body-grid">
+      <div class="hint">${escapeHtml(m.concepto)} · ${cjMoney(m.valor)}</div>
+      <div class="alerta-box">No se borra: queda anulado con el motivo y deja de sumar en la caja.</div>
+      <label>Motivo<input type="text" id="cjMotivoAnular" placeholder="¿Por qué se anula?"></label>
+    </div>
+  `, {
+    textoConfirmar: "Sí, anular",
+    onConfirm: async () => {
+      const motivo = document.getElementById("cjMotivoAnular").value.trim();
+      if (!motivo) { toast("Escribe el motivo de la anulación.", true); return; }
+      if (m.tipo === "entrada" && cjResumen(m.fecha).saldo - Number(m.valor) < 0) { toast("No se puede anular: la caja quedaría en negativo.", true); return; }
+      try {
+        const { error } = await sb.from("caja_movimientos").update({ anulado_motivo: motivo, anulado_en: new Date().toISOString() }).eq("id", m.id);
+        throwIfError(error);
+        cerrarModal();
+        toast(`${cjNum(m)} anulado`);
+        await cargarCaja();
+        renderCaja();
+      } catch (err) {
+        toast(err.message || "No se pudo anular", true);
+      }
+    },
+  });
+  document.getElementById("cjMotivoAnular").focus();
+}
+
+/* ---------------------------- Cierres (historial) ---------------------------- */
+function cjCierresHTML() {
+  const mes = CJ.mes || todayISO().slice(0, 7);
+  const list = cjFechasCierre().filter(f => f.startsWith(mes)).reverse().map(f => cajaCierres[f]);
+  const sum = (k) => list.reduce((s, c) => s + Number(c[k] || 0), 0);
+  const reap = cajaReaperturas.filter(x => x.fecha.startsWith(mes));
+  return `<div class="panel">
+    <div class="filtros-bar">
+      <label class="fecha-label">Mes<input type="month" id="cjMes" value="${mes}"></label>
+      <span class="hint" style="align-self:center">${list.length} cierre(s)</span>
+      <button type="button" class="btn-ghost" id="cjCierresCSV" style="margin-left:auto">Descargar CSV</button>
+    </div>
+    <div class="table-wrap"><table class="cj-tabla">
+      <thead><tr><th>N°</th><th>Fecha</th><th class="num">Inicial</th><th class="num">Entradas</th><th class="num">Salidas</th><th class="num">Debe haber</th><th class="num">Contado</th><th class="num">Diferencia</th><th class="num">Entregado</th><th class="num">Quedó</th><th>Responsable</th><th></th></tr></thead>
+      <tbody>${list.map(c => `<tr class="cj-fila-click" data-cjir="${c.fecha}">
+        <td class="cod">${c.numero}</td><td>${fechaExcel(c.fecha)}</td>
+        <td class="num">${cjMoney(c.inicial)}</td><td class="num cj-e">${cjMoney(c.entradas)}</td><td class="num cj-s">${cjMoney(c.salidas)}</td>
+        <td class="num">${cjMoney(c.esperado)}</td><td class="num"><b>${cjMoney(c.contado)}</b></td>
+        <td class="num ${Math.abs(c.diferencia) < 1 ? "" : c.diferencia < 0 ? "cj-s" : "cj-e"}" title="${escapeHtml(c.nota || "")}">${Math.abs(c.diferencia) < 1 ? "✓" : (c.diferencia < 0 ? "−" : "+") + cjMoney(Math.abs(c.diferencia))}</td>
+        <td class="num">${cjMoney(c.entrega)}</td><td class="num">${cjMoney(c.queda)}</td><td>${escapeHtml(c.responsable || "")}</td>
+        <td><button type="button" class="btn-icon" data-cjprintcierre="${c.fecha}" title="Imprimir cierre">🖨</button></td>
+      </tr>`).join("") || `<tr class="empty-row"><td colspan="12">No hay cierres en este mes.</td></tr>`}</tbody>
+    </table></div>
+    ${list.length ? `<p class="hint">Totales del mes: entradas ${cjMoney(sum("entradas"))} · salidas ${cjMoney(sum("salidas"))} · entregado ${cjMoney(sum("entrega"))}</p>` : ""}
+    ${reap.length ? `<p class="hint"><b>Reaperturas:</b> ${reap.map(x => `${fechaExcel(x.fecha)} (${new Date(x.creado_en).toLocaleString("es-CO", { dateStyle: "short", timeStyle: "short" })}): ${escapeHtml(x.motivo)}`).join(" · ")}</p>` : ""}
+  </div>`;
+}
+
+/* ---------------------------- Reporte por cuenta (legalización) ---------------------------- */
+function cjRango() {
+  const hoy = todayISO();
+  return { desde: CJ.desde || hoy.slice(0, 8) + "01", hasta: CJ.hasta || hoy };
+}
+function cjReporteDatos() {
+  const { desde, hasta } = cjRango();
+  const movs = cajaMovs.filter(m => !m.anulado_en && m.fecha >= desde && m.fecha <= hasta)
+    .sort((a, b) => (a.fecha + (a.hora || "")).localeCompare(b.fecha + (b.hora || "")));
+  const grupos = (tipo) => {
+    const g = new Map();
+    for (const m of movs.filter(x => x.tipo === tipo)) {
+      const k = cjCat(m.categoria_id) || { id: m.categoria_id, nombre: "—", cuenta: "" };
+      const x = g.get(k.id) || { k, n: 0, total: 0, sinSoporte: 0 };
+      x.n++; x.total += Number(m.valor); if (m.soporte === "sin") x.sinSoporte += Number(m.valor);
+      g.set(k.id, x);
+    }
+    return [...g.values()].sort((a, b) => b.total - a.total);
+  };
+  const cierres = cjFechasCierre().filter(f => f >= desde && f <= hasta).map(f => cajaCierres[f]);
+  return { desde, hasta, movs, sal: grupos("salida"), ent: grupos("entrada"), cierres };
+}
+function cjReporteHTML() {
+  const d = cjReporteDatos();
+  const tot = (l) => l.reduce((s, x) => s + x.total, 0);
+  const tabla = (titulo, l, cls) => `<p class="hint"><b>${titulo}</b> · ${cjMoney(tot(l))}</p>
+    <div class="table-wrap"><table class="cj-tabla"><thead><tr><th>Cuenta</th><th>Categoría</th><th class="num">Mov.</th><th class="num">Sin soporte</th><th class="num">Total</th></tr></thead>
+    <tbody>${l.map(x => `<tr><td class="cod">${escapeHtml(x.k.cuenta || "")}</td><td>${escapeHtml(x.k.nombre)}</td><td class="num">${x.n}</td><td class="num">${x.sinSoporte ? cjMoney(x.sinSoporte) : ""}</td><td class="num ${cls}"><b>${cjMoney(x.total)}</b></td></tr>`).join("") || `<tr class="empty-row"><td colspan="5">Nada en este rango.</td></tr>`}</tbody></table></div>`;
+  const sinSop = d.movs.filter(m => m.tipo === "salida" && m.soporte === "sin").reduce((s, m) => s + Number(m.valor), 0);
+  const dif = d.cierres.reduce((s, c) => s + Number(c.diferencia), 0);
+  return `<div class="panel">
+    <div class="filtros-bar">
+      <label class="fecha-label">Desde<input type="date" id="cjDesde" value="${d.desde}"></label>
+      <label class="fecha-label">Hasta<input type="date" id="cjHasta" value="${d.hasta}"></label>
+      <button type="button" class="btn-ghost" id="cjRepCSV" style="margin-left:auto">Descargar detalle CSV</button>
+      <button type="button" class="btn-primary" id="cjRepPrint">🖨 Imprimir legalización</button>
+    </div>
+    <div class="kpi-grid">
+      <div class="kpi-card kpi-danger"><span class="kpi-label">Gastos y salidas</span><span class="kpi-value">${cjMoney(tot(d.sal))}</span><span class="kpi-sub">${d.movs.filter(m => m.tipo === "salida").length} comprobante(s) de egreso</span></div>
+      <div class="kpi-card kpi-green"><span class="kpi-label">Entradas</span><span class="kpi-value">${cjMoney(tot(d.ent))}</span><span class="kpi-sub">${d.movs.filter(m => m.tipo === "entrada").length} recibo(s) de caja</span></div>
+      <div class="kpi-card kpi-gold"><span class="kpi-label">Salidas sin soporte</span><span class="kpi-value">${cjMoney(sinSop)}</span><span class="kpi-sub">no deducibles sin documento</span></div>
+      <div class="kpi-card kpi-blue"><span class="kpi-label">Sobrantes / faltantes</span><span class="kpi-value">${Math.abs(dif) < 1 ? "✓ $0" : (dif < 0 ? "−" : "+") + cjMoney(Math.abs(dif))}</span><span class="kpi-sub">${d.cierres.length} cierre(s) en el rango</span></div>
+    </div>
+    ${tabla("Salidas por cuenta", d.sal, "cj-s")}
+    ${tabla("Entradas por cuenta", d.ent, "cj-e")}
+    <p class="hint">Para pedir el <b>reembolso</b> de la caja, imprime la legalización: lista los gastos por cuenta con sus soportes. Las cuentas PUC son sugeridas; ajústalas con tu contador en Caja → Ajustes.</p>
+  </div>`;
+}
+function cjCSV(filas) {
+  return "﻿" + filas.map(f => f.map(v => { const s = String(v ?? ""); return /[;"\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; }).join(";")).join("\r\n");
+}
+function cjDescargar(nombre, contenido) {
+  const blob = new Blob([contenido], { type: "text/csv;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url; a.download = nombre; a.click();
+  URL.revokeObjectURL(url);
+}
+function cjDescargarDetalle() {
+  const d = cjReporteDatos();
+  const filas = [["Fecha", "Comprobante", "Tipo", "Cuenta", "Categoría", "Concepto", "Tercero", "NIT", "Soporte", "N° soporte", "Entrada", "Salida"]];
+  for (const m of d.movs) {
+    const k = cjCat(m.categoria_id);
+    filas.push([m.fecha, cjNum(m), CJ_TIPO[m.tipo], k?.cuenta || "", k?.nombre || "", m.concepto, m.tercero, m.nit, CJ_SOPORTES[m.soporte], m.soporte_n, m.tipo === "entrada" ? m.valor : "", m.tipo === "salida" ? m.valor : ""]);
+  }
+  cjDescargar(`Caja_menor_${d.desde}_a_${d.hasta}.csv`, cjCSV(filas));
+}
+function cjDescargarCierres() {
+  const mes = CJ.mes || todayISO().slice(0, 7);
+  const filas = [["N°", "Fecha", "Saldo inicial", "Entradas", "Salidas", "Debe haber", "Contado", "Diferencia", "Entregado", "Quedó", "Responsable", "Observación"]];
+  for (const f of cjFechasCierre().filter(x => x.startsWith(mes))) {
+    const c = cajaCierres[f];
+    filas.push([c.numero, c.fecha, c.inicial, c.entradas, c.salidas, c.esperado, c.contado, c.diferencia, c.entrega, c.queda, c.responsable, c.nota]);
+  }
+  cjDescargar(`Cierres_caja_${mes}.csv`, cjCSV(filas));
+}
+
+/* ---------------------------- Ajustes ---------------------------- */
+function cjAjustesHTML() {
+  if (!cajaConfig) return cjSetupHTML();
+  const usados = new Set(cajaMovs.map(m => m.categoria_id));
+  const fila = (k) => `<tr>
+    <td><input data-cjkn="${k.id}" value="${escapeHtml(k.nombre)}"></td>
+    <td><input data-cjkc="${k.id}" value="${escapeHtml(k.cuenta || "")}" style="width:110px" placeholder="PUC"></td>
+    <td>${usados.has(k.id) ? `<span class="hint" title="Tiene movimientos: no se puede quitar">en uso</span>` : `<button type="button" class="btn-icon danger" data-cjkdel="${k.id}" title="Quitar">✕</button>`}</td></tr>`;
+  const lista = (tipo) => `<div class="table-wrap"><table class="cj-tabla"><thead><tr><th>${tipo === "salida" ? "Categorías de salida" : "Categorías de entrada"}</th><th>Cuenta</th><th></th></tr></thead>
+    <tbody>${cajaCats.filter(k => k.tipo === tipo).map(fila).join("")}</tbody></table></div>
+    <button type="button" class="btn-ghost" data-cjkadd="${tipo}" style="margin-top:6px">+ Agregar categoría</button>`;
+  return `<div class="panel">
+    <div class="panel-title-row"><h3>Base de la caja</h3></div>
+    <p class="hint">La caja empezó el <b>${fechaExcel(cajaConfig.fecha_inicio)}</b> con <b>${cjMoney(cajaConfig.monto_inicio)}</b>.</p>
+    <div class="form-grid" style="max-width:420px">
+      <label>Base que queda cada día (se sugiere al cerrar)<input id="cjBaseIn" inputmode="numeric" value="${Math.round(cajaConfig.base ?? cajaConfig.monto_inicio).toLocaleString("es-CO")}"></label>
+    </div>
+    <p class="hint">Si la base cambia (por ejemplo, la aumentas), registra el dinero como <b>entrada → Reposición de caja</b> y actualiza aquí la base.</p>
+  </div>
+  <div class="panel">
+    <div class="panel-title-row"><h3>Categorías y cuentas contables</h3></div>
+    <p class="hint">Cuentas PUC sugeridas: confírmalas con tu contador. Los cambios se guardan al salir de cada casilla.</p>
+    ${lista("salida")}
+    ${lista("entrada")}
+  </div>`;
+}
+
+/* ---------------------------- Impresión ---------------------------- */
+function cjImprimirMov(m) {
+  const k = cjCat(m.categoria_id), egreso = m.tipo === "salida";
+  document.getElementById("areaImprimirCaja").innerHTML = `<div class="hoja-imprimir">
+    <h2>${egreso ? "Comprobante de egreso" : "Recibo de caja"}</h2>
+    <div class="hoja-sub">Mercados y Carnes OR · Caja menor · N° ${cjNum(m)} · ${fechaExcel(m.fecha)} ${escapeHtml(m.hora || "")}</div>
+    ${m.anulado_en ? `<p><b>ANULADO:</b> ${escapeHtml(m.anulado_motivo || "")}</p>` : ""}
+    <p>${egreso ? "Pagado a" : "Recibido de"}: <b>${escapeHtml(m.tercero || "—")}</b>${m.nit ? " · NIT/C.C. " + escapeHtml(m.nit) : ""}</p>
+    <p>Soporte: ${escapeHtml(CJ_SOPORTES[m.soporte] || "")}${m.soporte_n ? " N° " + escapeHtml(m.soporte_n) : ""}</p>
+    <table>
+      <thead><tr><th>Cuenta</th><th>Categoría</th><th>Concepto</th><th class="num">Valor</th></tr></thead>
+      <tbody><tr><td>${escapeHtml(k?.cuenta || "")}</td><td>${escapeHtml(k?.nombre || "")}</td><td>${escapeHtml(m.concepto)}</td><td class="num">${cjMoney(m.valor)}</td></tr></tbody>
+      <tfoot><tr><td colspan="3">La suma de: ${cjEnLetras(m.valor)}</td><td class="num">${cjMoney(m.valor)}</td></tr></tfoot>
+    </table>
+    <div class="cj-firmas"><div>Elaboró</div><div>Aprobó</div><div>${egreso ? "Recibí (firma y C.C.)" : "Entregó (firma y C.C.)"}</div></div>
+  </div>`;
+  window.print();
+}
+function cjImprimirCierre(f) {
+  const c = cajaCierres[f]; if (!c) return;
+  const movs = cjMovsDia(f).filter(m => !m.anulado_en);
+  const den = Object.entries(c.arqueo || {}).sort((a, b) => b[0] - a[0]);
+  document.getElementById("areaImprimirCaja").innerHTML = `<div class="hoja-imprimir">
+    <h2>Cierre de caja N° ${c.numero}</h2>
+    <div class="hoja-sub">Mercados y Carnes OR · Caja menor · ${fechaExcel(f)} · Responsable: ${escapeHtml(c.responsable || "—")}</div>
+    <table>
+      <thead><tr><th>N°</th><th>Cuenta</th><th>Concepto</th><th class="num">Entrada</th><th class="num">Salida</th></tr></thead>
+      <tbody>${movs.map(m => `<tr><td>${cjNum(m)}</td><td>${escapeHtml(cjCat(m.categoria_id)?.cuenta || "")}</td><td>${escapeHtml(m.concepto)}${m.tercero ? " · " + escapeHtml(m.tercero) : ""}</td><td class="num">${m.tipo === "entrada" ? cjMoney(m.valor) : ""}</td><td class="num">${m.tipo === "salida" ? cjMoney(m.valor) : ""}</td></tr>`).join("") || `<tr><td colspan="5">Sin movimientos.</td></tr>`}</tbody>
+      <tfoot>
+        <tr><td colspan="4">Saldo inicial</td><td class="num">${cjMoney(c.inicial)}</td></tr>
+        <tr><td colspan="4">+ Entradas</td><td class="num">${cjMoney(c.entradas)}</td></tr>
+        <tr><td colspan="4">− Salidas</td><td class="num">${cjMoney(c.salidas)}</td></tr>
+        <tr><td colspan="4">= Debe haber</td><td class="num">${cjMoney(c.esperado)}</td></tr>
+        <tr><td colspan="4">Contado (arqueo: ${den.map(([dd, q]) => `${q}×${cjMoney(+dd)}`).join(", ") || "—"})</td><td class="num">${cjMoney(c.contado)}</td></tr>
+        <tr><td colspan="4">${Math.abs(c.diferencia) < 1 ? "Diferencia" : (c.diferencia < 0 ? "Faltante" : "Sobrante")}</td><td class="num">${Math.abs(c.diferencia) < 1 ? "$0" : cjMoney(Math.abs(c.diferencia))}</td></tr>
+        <tr><td colspan="4">Entrega</td><td class="num">${cjMoney(c.entrega)}</td></tr>
+        <tr><td colspan="4"><b>Queda en caja</b></td><td class="num"><b>${cjMoney(c.queda)}</b></td></tr>
+      </tfoot>
+    </table>
+    ${c.nota ? `<p><b>Observación:</b> ${escapeHtml(c.nota)}</p>` : ""}
+    <div class="cj-firmas"><div>Entregó (responsable de caja)</div><div>Recibió / revisó</div></div>
+  </div>`;
+  window.print();
+}
+function cjImprimirLegalizacion() {
+  const d = cjReporteDatos();
+  const sal = d.movs.filter(m => m.tipo === "salida");
+  document.getElementById("areaImprimirCaja").innerHTML = `<div class="hoja-imprimir">
+    <h2>Legalización de caja menor</h2>
+    <div class="hoja-sub">Mercados y Carnes OR · Del ${fechaExcel(d.desde)} al ${fechaExcel(d.hasta)}</div>
+    <table>
+      <thead><tr><th>Fecha</th><th>N°</th><th>Cuenta</th><th>Concepto / tercero</th><th>Soporte</th><th class="num">Valor</th></tr></thead>
+      <tbody>${sal.map(m => `<tr><td>${fechaExcel(m.fecha)}</td><td>${cjNum(m)}</td><td>${escapeHtml(cjCat(m.categoria_id)?.cuenta || "")}</td><td>${escapeHtml(m.concepto)}${m.tercero ? " · " + escapeHtml(m.tercero) : ""}</td><td>${m.soporte === "sin" ? "SIN SOPORTE" : escapeHtml(CJ_SOPORTES[m.soporte]) + (m.soporte_n ? " " + escapeHtml(m.soporte_n) : "")}</td><td class="num">${cjMoney(m.valor)}</td></tr>`).join("") || `<tr><td colspan="6">Sin salidas en el rango.</td></tr>`}</tbody>
+      <tfoot><tr><td colspan="5">A reembolsar (${sal.length} comprobante(s))</td><td class="num"><b>${cjMoney(sal.reduce((s, m) => s + Number(m.valor), 0))}</b></td></tr></tfoot>
+    </table>
+    <p>Son: ${cjEnLetras(sal.reduce((s, m) => s + Number(m.valor), 0))}</p>
+    <div class="cj-firmas"><div>Responsable de caja</div><div>Revisó (contabilidad)</div><div>Aprobó</div></div>
+  </div>`;
+  window.print();
+}
+
+/* ---------------------------- Eventos ---------------------------- */
+document.getElementById("cjSeg").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-cjv]"); if (!b) return;
+  CJ.vista = b.dataset.cjv; CJ.editId = null; renderCaja();
+});
+document.getElementById("cjContenido").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (e.target.id === "cjForm") { cjGuardarMov(); return; }
+  if (e.target.id === "cjSetupForm") {
+    const monto = Math.round(cjNumTexto(document.getElementById("cjSetupMonto").value) || 0);
+    const fecha = document.getElementById("cjSetupFecha").value || todayISO();
+    if (monto < 0) { toast("Revisa la base inicial.", true); return; }
+    const baseTxt = document.getElementById("cjSetupBase").value.trim();
+    const base = baseTxt ? Math.round(cjNumTexto(baseTxt) || 0) : monto;
+    try {
+      const { error } = await sb.from("caja_config").upsert({ id: true, fecha_inicio: fecha, monto_inicio: monto, base, actualizado_en: new Date().toISOString() });
+      throwIfError(error);
+      toast(`Caja menor lista · base ${cjMoney(monto)}`);
+      await cargarCaja();
+      renderCaja();
+    } catch (err) {
+      toast(err.message || "No se pudo guardar", true);
+    }
+  }
+});
+document.getElementById("cjContenido").addEventListener("click", async (e) => {
+  const t = e.target;
+  const tipoBtn = t.closest("[data-cjtipo]");
+  if (tipoBtn && !tipoBtn.disabled) { CJ.tipo = tipoBtn.dataset.cjtipo; renderCaja(); document.getElementById("cjConcepto")?.focus(); return; }
+  const ir = t.closest("[data-cjir]");
+  if (ir && !t.closest("button:not([data-cjir])")) {
+    const f = ir.dataset.cjir > todayISO() ? todayISO() : ir.dataset.cjir;
+    document.getElementById("fechaTrabajo").value = f;
+    CJ.editId = null; CJ.vista = "dia";
+    refrescarTodo();
+    return;
+  }
+  const pr = t.closest("[data-cjprint]");
+  if (pr) { const m = cajaMovs.find(x => x.id === pr.dataset.cjprint); if (m) cjImprimirMov(m); return; }
+  const pc = t.closest("[data-cjprintcierre]");
+  if (pc) { cjImprimirCierre(pc.dataset.cjprintcierre); return; }
+  const ed = t.closest("[data-cjedit]");
+  if (ed) { CJ.editId = ed.dataset.cjedit; renderCaja(); document.getElementById("cjValor")?.focus(); document.getElementById("cjValor")?.select(); return; }
+  const an = t.closest("[data-cjanular]");
+  if (an) { const m = cajaMovs.find(x => x.id === an.dataset.cjanular); if (m) cjAnular(m); return; }
+  if (t.id === "cjCancelar") { CJ.editId = null; renderCaja(); return; }
+  if (t.id === "cjCerrar") { cjCerrarDia(); return; }
+  const re = t.closest("[data-cjreabrir]");
+  if (re) { cjReabrir(re.dataset.cjreabrir); return; }
+  if (t.id === "cjCierresCSV") { cjDescargarCierres(); return; }
+  if (t.id === "cjRepCSV") { cjDescargarDetalle(); return; }
+  if (t.id === "cjRepPrint") { cjImprimirLegalizacion(); return; }
+  const kadd = t.closest("[data-cjkadd]");
+  if (kadd) {
+    const { data, error } = await sb.from("caja_categorias").insert({ tipo: kadd.dataset.cjkadd, nombre: "Nueva categoría", cuenta: "", orden: cajaCats.length }).select().maybeSingle();
+    if (error) { toast(error.message, true); return; }
+    cajaCats.push(data);
+    renderCaja();
+    const ins = document.querySelectorAll("[data-cjkn]");
+    ins[ins.length - 1]?.select();
+    return;
+  }
+  const kdel = t.closest("[data-cjkdel]");
+  if (kdel) {
+    const { error } = await sb.from("caja_categorias").delete().eq("id", kdel.dataset.cjkdel);
+    if (error) { toast(error.message, true); return; }
+    cajaCats = cajaCats.filter(k => k.id !== kdel.dataset.cjkdel);
+    renderCaja();
+  }
+});
+document.getElementById("cjContenido").addEventListener("input", (e) => {
+  const t = e.target, f = fechaTrabajo();
+  if (t.dataset.cjden) { cjArqueo(f).den[t.dataset.cjden] = t.value.replace(/\D/g, ""); cjActualizarCuadro(); return; }
+  if (t.id === "cjQueda") { cjArqueo(f).queda = t.value.trim(); cjActualizarCuadro(); return; }
+  if (t.id === "cjResp") { cjArqueo(f).resp = t.value; return; }
+  if (t.id === "cjNota") { cjArqueo(f).nota = t.value; return; }
+});
+document.getElementById("cjContenido").addEventListener("change", async (e) => {
+  const t = e.target;
+  if (t.id === "cjMes") { CJ.mes = t.value; renderCaja(); return; }
+  if (t.id === "cjDesde") { CJ.desde = t.value; renderCaja(); return; }
+  if (t.id === "cjHasta") { CJ.hasta = t.value; renderCaja(); return; }
+  if (t.id === "cjBaseIn") {
+    const v = cjNumTexto(t.value);
+    if (v == null || v < 0) { toast("Revisa la base.", true); return; }
+    const base = Math.round(v);
+    const { error } = await sb.from("caja_config").update({ base, actualizado_en: new Date().toISOString() }).eq("id", true);
+    if (error) { toast(error.message, true); return; }
+    cajaConfig.base = base;
+    t.value = base.toLocaleString("es-CO");
+    toast(`Base diaria: ${cjMoney(base)}`);
+    return;
+  }
+  const kId = t.dataset.cjkn || t.dataset.cjkc;
+  if (kId) {
+    const cat = cjCat(kId); if (!cat) return;
+    let patch;
+    if (t.dataset.cjkn) { if (!t.value.trim()) { t.value = cat.nombre; return; } patch = { nombre: t.value.trim() }; }
+    else patch = { cuenta: t.value.trim() };
+    const { error } = await sb.from("caja_categorias").update(patch).eq("id", kId);
+    if (error) { toast(error.message, true); return; }
+    Object.assign(cat, patch);
+    toast("Categoría guardada");
+  }
+});
+// El valor se formatea con puntos de miles al salir de la casilla.
+document.getElementById("cjContenido").addEventListener("focusout", (e) => {
+  const t = e.target;
+  if (["cjValor", "cjQueda", "cjSetupMonto", "cjSetupBase"].includes(t.id)) {
+    const v = cjNumTexto(t.value);
+    if (v != null && t.value.trim()) t.value = Math.round(v).toLocaleString("es-CO");
+  }
+});
+
+/* ==========================================================================
    INICIO
    ========================================================================== */
 
 document.getElementById("fechaTrabajo").value = todayISO();
-document.getElementById("filtroDesde").value = "";
 refrescarTodo();

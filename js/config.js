@@ -9,9 +9,13 @@ window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXB
 /* Clave simple para que no cualquiera que encuentre el link entre a escribir datos.
    Esto NO es seguridad real (cualquiera que vea el codigo de la pagina puede
    encontrarla), solo un freno basico. Cambiala por la que quieras.
-   Hay tres claves: una de edicion total (puede registrar/editar/eliminar todo y
-   marcar el pedido), una de platano (edita solo la pestana Platano y el resto
-   solo lo ve) y una de solo consulta (ve todo pero no guarda ni borra nada). */
+   Hay cuatro claves: una de edicion total (puede registrar/editar/eliminar todo
+   y marcar el pedido), una de platano (edita solo la pestana Platano y el
+   resto solo lo ve), una de solo consulta (ve todo pero no guarda ni borra
+   nada) y una de caja (tiene los mismos permisos que la de edicion total y
+   ademas es la UNICA que ve la pestana "Caja" -- ni siquiera la clave de
+   edicion total la ve). */
 window.APP_PASSWORD = "OR2026";
 window.APP_PASSWORD_PLATANO = "PLATANO2026";
 window.APP_PASSWORD_VIEW = "0000";
+window.APP_PASSWORD_CAJA = "4215";
