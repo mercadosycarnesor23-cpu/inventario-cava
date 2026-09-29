@@ -40,6 +40,7 @@
     <button class="tab-btn" data-tab="platano">Plátano</button>
     <button class="tab-btn" data-tab="productos">Productos</button>
     <button class="tab-btn" data-tab="resumen">Resumen</button>
+    <button class="tab-btn" data-tab="caja" hidden>Caja</button>
   </nav>
   <div class="topbar-actions">
     <span id="badgeSoloLectura" class="badge badge-warn" hidden>Solo lectura</span>
@@ -463,6 +464,20 @@
     </div>
   </section>
 
+  <!-- CAJA (pestaña exclusiva de la clave de Caja) -->
+  <section class="tab-panel" id="tab-caja">
+    <div class="panel-title-row">
+      <h3>Caja menor</h3>
+      <span class="filtro-chip-row" id="cjSeg" style="margin:0">
+        <button type="button" class="chip active" data-cjv="dia">Caja del día</button>
+        <button type="button" class="chip" data-cjv="cierres">Cierres</button>
+        <button type="button" class="chip" data-cjv="reporte">Reporte por cuenta</button>
+        <button type="button" class="chip" data-cjv="ajustes">Ajustes</button>
+      </span>
+    </div>
+    <div id="cjContenido"></div>
+  </section>
+
 </main>
 
 <div id="toast" class="toast" hidden></div>
@@ -479,6 +494,7 @@
 </div>
 
 <div id="areaImprimirSugerido"></div>
+<div id="areaImprimirCaja"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script src="js/config.js"></script>
