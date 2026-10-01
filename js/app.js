@@ -3501,8 +3501,75 @@ document.getElementById("cjContenido").addEventListener("focusout", (e) => {
 });
 
 /* ==========================================================================
+   RECORDATORIO DE MERCANCÍA DELICADA (solo con la clave de edición total,
+   OR2026). Mientras se está despachando, avisa dos veces en la mañana (hacia
+   las 7:00 y hacia las 8:00) que revisen con cuidado lo ya despachado de
+   coliflor, cilantro, brócoli y demás refrigerados. Si la pestaña se abre
+   después de esa hora igual avisa (no se pierde el aviso por abrir tarde),
+   pero solo una vez por franja y por día (se recuerda en localStorage).
+   ========================================================================== */
+const RECORDATORIO_DELICADOS_HORAS = [7, 8];
+function recordatorioDelicadosClave(hora) {
+  return `inv_recordatorio_delicados_${todayISO()}_${hora}`;
+}
+// Sonido sutil (dos tonos suaves tipo "ding-dong"), generado con Web Audio
+// para no depender de un archivo de audio aparte.
+function sonarAlertaSutil() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const tono = (freq, inicio, dur, vol) => {
+      const osc = ctx.createOscillator(), gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, ctx.currentTime + inicio);
+      gain.gain.exponentialRampToValueAtTime(vol, ctx.currentTime + inicio + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + inicio + dur);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + inicio);
+      osc.stop(ctx.currentTime + inicio + dur + 0.05);
+    };
+    tono(880, 0, 0.35, 0.16);
+    tono(1175, 0.18, 0.4, 0.13);
+  } catch (err) {
+    // Si el navegador bloquea el audio (sin interacción previa), se omite el sonido sin romper nada.
+  }
+}
+function mostrarRecordatorioDelicados() {
+  sonarAlertaSutil();
+  abrirModal("Recordatorio: mercancía delicada", `
+    <div class="modal-body-grid">
+      <div class="alerta-box">
+        Antes de seguir despachando, revisa con cuidado lo que ya salió de
+        <b>coliflor, cilantro, brócoli</b> y demás <b>productos refrigerados</b>:
+        son delicados y se maltratan fácil. Confirma que se empacaron y
+        despacharon con cuidado.
+      </div>
+    </div>
+  `, { textoConfirmar: "Entendido", ocultarCancelar: true, onConfirm: () => cerrarModal() });
+}
+function revisarRecordatorioDelicados() {
+  if (rolActual() !== "editar") return;
+  if (!document.getElementById("gateOverlay").hidden) return; // todavía no ha iniciado sesión
+  if (!document.getElementById("modalOverlay").hidden) return; // hay otro aviso abierto; se revisa en el siguiente minuto
+  const ahora = new Date();
+  const horaActualNum = ahora.getHours() + ahora.getMinutes() / 60;
+  for (const hora of RECORDATORIO_DELICADOS_HORAS) {
+    const clave = recordatorioDelicadosClave(hora);
+    if (horaActualNum >= hora && !localStorage.getItem(clave)) {
+      localStorage.setItem(clave, "1");
+      mostrarRecordatorioDelicados();
+      return; // si hay dos franjas pendientes a la vez, la otra sale en la siguiente revisión (cada minuto)
+    }
+  }
+}
+setInterval(revisarRecordatorioDelicados, 60000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) revisarRecordatorioDelicados(); });
+
+/* ==========================================================================
    INICIO
    ========================================================================== */
 
 document.getElementById("fechaTrabajo").value = todayISO();
 refrescarTodo();
+revisarRecordatorioDelicados();
