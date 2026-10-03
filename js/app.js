@@ -181,7 +181,9 @@ document.getElementById("fechaTrabajo").addEventListener("change", refrescarTodo
 
 /* Al desplazar: oculta el header para ganar espacio, y en la pestaña de
    Plátano muestra una barrita fija arriba con el saldo actual (verde/maduro)
-   para no perderlo de vista mientras se navega el formulario. */
+   para no perderlo de vista mientras se navega el formulario. El buscador
+   del Pedido queda pegado arriba: justo debajo del header cuando se ve, o
+   en el borde de la pantalla cuando el header se esconde. */
 let ultimoScrollY = window.scrollY;
 function actualizarBarraScroll() {
   const y = window.scrollY;
@@ -189,11 +191,20 @@ function actualizarBarraScroll() {
   const bajando = y > ultimoScrollY && y > 60;
   header.classList.toggle("header-oculto", bajando);
   ultimoScrollY = y;
+  const topFijo = bajando ? 0 : header.offsetHeight;
+  document.documentElement.style.setProperty("--alto-header", topFijo + "px");
 
   const enPlatano = document.getElementById("tab-platano").classList.contains("active");
   document.getElementById("platanoMiniBar").hidden = !(enPlatano && y > 160);
+
+  // Sombra bajo el buscador del pedido solo cuando ya quedó pegado arriba.
+  const sentinela = document.getElementById("pedidoBuscarSentinela");
+  if (sentinela && sentinela.offsetParent !== null) {
+    document.getElementById("pedidoBuscarWrap").classList.toggle("fijo", sentinela.getBoundingClientRect().top < topFijo);
+  }
 }
 window.addEventListener("scroll", actualizarBarraScroll, { passive: true });
+window.addEventListener("resize", actualizarBarraScroll);
 
 /* Menu hamburguesa (solo se ve en pantallas chicas, ver css) */
 function cerrarMenu() {
@@ -2409,7 +2420,23 @@ document.getElementById("pedidoChips").addEventListener("click", (e) => {
   pedidoFiltroEstado = chip.dataset.estado;
   renderPedido();
 });
-document.getElementById("pedidoBuscar").addEventListener("input", renderPedido);
+// Buscador del pedido con ✕ para borrar rápido y volver a escribir.
+const pedidoBuscarInput = document.getElementById("pedidoBuscar");
+const pedidoBuscarX = document.getElementById("pedidoBuscarX");
+function limpiarBuscarPedido() {
+  pedidoBuscarInput.value = "";
+  pedidoBuscarX.hidden = true;
+  renderPedido();
+  pedidoBuscarInput.focus({ preventScroll: true });
+}
+pedidoBuscarInput.addEventListener("input", () => {
+  pedidoBuscarX.hidden = !pedidoBuscarInput.value;
+  renderPedido();
+});
+pedidoBuscarInput.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && pedidoBuscarInput.value) limpiarBuscarPedido();
+});
+pedidoBuscarX.addEventListener("click", limpiarBuscarPedido);
 document.getElementById("tablaPedido").addEventListener("click", (e) => {
   const btn = e.target.closest(".ped-btn");
   if (!btn) return;
