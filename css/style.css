@@ -333,7 +333,7 @@ body.rol-platano .tab-panel:not(#tab-platano) .btn-icon { display: none !importa
 
 #pedidoChips { gap: 6px; margin-bottom: 6px; }
 #pedidoChips .chip { padding: 3px 10px; font-size: 12px; }
-#pedidoBuscar { margin-bottom: 6px; padding: 6px 10px; font-size: 13px; }
+#pedidoBuscar { margin-bottom: 0; padding: 8px 44px 8px 10px; font-size: 13px; }
 
 .chip[data-estado="despachado"].active { background: var(--verde); border-color: var(--verde); }
 .chip[data-estado="falta"].active { background: var(--amarillo); border-color: var(--amarillo); color: var(--amarillo-ink); }
@@ -372,8 +372,28 @@ body.rol-platano .tab-panel:not(#tab-platano) .btn-icon { display: none !importa
 .ped-btn.activo[data-estado="no_hay"] { background: var(--rojo); color: #fff; }
 .ped-leyenda { font-size: 11.5px; color: var(--muted); margin: 0 0 6px; }
 
+/* Buscador del pedido: queda fijo arriba al desplazar (debajo del encabezado
+   cuando este se muestra; --alto-header lo actualiza app.js al hacer scroll). */
+.ped-buscar-wrap {
+  position: sticky; top: var(--alto-header, 0px); z-index: 5;
+  background: var(--card); margin: 0 -14px 6px; padding: 6px 14px;
+  transition: top .25s ease, box-shadow .2s ease;
+}
+.ped-buscar-wrap.fijo { box-shadow: 0 6px 10px -6px rgba(0, 31, 92, .25); }
+.buscar-con-x { position: relative; }
+.buscar-con-x .input-search { display: block; }
+.buscar-x {
+  position: absolute; right: 4px; top: 3px; bottom: 3px; aspect-ratio: 1 / 1;
+  padding: 0; border: none; border-radius: 999px;
+  background: #eef0f1; color: var(--muted); font-size: 14px; font-weight: 700; line-height: 1;
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.buscar-x:hover { background: var(--azul-claro); color: var(--azul); }
+.buscar-x[hidden] { display: none; }
+
 @media (max-width: 720px) {
   #tab-pedido .panel { padding: 10px; }
+  .ped-buscar-wrap { margin: 0 -10px 6px; padding: 6px 10px; }
   .tabla-pedido { width: 100%; }
   .tabla-pedido th, .tabla-pedido td { padding: 3px 4px; }
   .ped-prod strong { word-break: break-word; }
