@@ -834,6 +834,10 @@ function invActualizarCalculo() {
     const kg = numDecimal(d.kg), cant = numDecimal(d.cant) ?? 1;
     fila.querySelector(".d-sub").textContent = kg && cant ? "−" + invKg(kg * cant) + " kg" : "";
   });
+  // Resumen que se ve en celular con la sección plegada.
+  const descKg = ps.desc.reduce((s, d) => s + d.cant * d.kg, 0);
+  document.getElementById("invCanastaResumen").textContent = invKg(invTaraKg()) + " kg";
+  document.getElementById("invDescResumen").textContent = descKg ? "−" + invKg(descKg) + " kg" : "Ninguno";
 }
 // Línea de información del producto elegido y número de la pesada (P1, P2...).
 function invRefrescarInfo() {
@@ -947,6 +951,21 @@ document.getElementById("invDescQuick").innerHTML = INV_DESC_RAPIDOS
   + `<button type="button" class="d-add" data-dadd="1" title="Agregar otra fila de descuento">+ Otro descuento</button>`;
 invRenderDescs();
 
+// En celular "Canasta por pesada" y "Descuentos" quedan plegadas; la flechita
+// las abre y se recuerda cómo las dejó cada quien.
+document.querySelectorAll(".inv-plegable").forEach(seccion => {
+  const cab = seccion.querySelector(".inv-plegable-cab");
+  let abierta = false;
+  try { abierta = localStorage.getItem("inv_abierta_" + seccion.id) === "1"; } catch (err) { /* sin almacenamiento local */ }
+  seccion.classList.toggle("abierto", abierta);
+  cab.setAttribute("aria-expanded", abierta ? "true" : "false");
+  cab.addEventListener("click", () => {
+    const ahora = seccion.classList.toggle("abierto");
+    cab.setAttribute("aria-expanded", ahora ? "true" : "false");
+    try { localStorage.setItem("inv_abierta_" + seccion.id, ahora ? "1" : ""); } catch (err) { /* sin almacenamiento local */ }
+  });
+});
+
 const invBuscarProducto = document.getElementById("buscarInventario");
 invBuscarProducto.addEventListener("input", () => {
   if (invProd && invBuscarProducto.value !== invProd.nombre) {
@@ -1028,7 +1047,7 @@ function renderInventarioHoy() {
   document.getElementById("invHoyResumen").textContent = !todas.length ? ""
     : q ? `${filas.length} de ${todas.length} producto(s)` : `${todas.length} producto(s)`;
   tbody.innerHTML = filas.map(filaInventarioHoy).join("")
-    || `<tr class="empty-row"><td colspan="6">${todas.length ? "Ningún producto del inventario de hoy coincide con la búsqueda." : "Todavía no has agregado productos al inventario de hoy."}</td></tr>`;
+    || `<tr class="empty-row"><td colspan="5">${todas.length ? "Ningún producto del inventario de hoy coincide con la búsqueda." : "Todavía no has agregado productos al inventario de hoy."}</td></tr>`;
   invRefrescarInfo();
 }
 function filaInventarioHoy(it) {
@@ -1036,11 +1055,10 @@ function filaInventarioHoy(it) {
   return `
     <tr class="inv-fila${abierto ? " abierta" : ""}" data-inv-toggle="${it.id}" title="${abierto ? "Ocultar" : "Ver"} canastas y kilos brutos">
       <td class="inv-tg"><span class="inv-flecha">▸</span></td>
-      <td><strong>${escapeHtml(it.nombre)}</strong> <span class="ped-cod">${escapeHtml(it.codigo)}</span></td>
+      <td><strong>${escapeHtml(it.nombre)}</strong> <span class="ped-cod">${escapeHtml(it.codigo)}</span>${it.inventarioHoyNotas ? `<div class="inv-nota-fila">${escapeHtml(it.inventarioHoyNotas)}</div>` : ""}</td>
       <td class="num"><strong>${fmt(it.inventarioHoyValor, it.unidad)}</strong></td>
       <td class="num">${it.inventarioHoyPesadas.length}</td>
-      <td>${escapeHtml(it.inventarioHoyNotas || "")}</td>
-      <td class="inv-acc"><button type="button" class="btn-icon danger" data-quitar-inv="${it.inventarioId}" title="Quitar todo el conteo de este producto">Quitar</button></td>
+      <td class="inv-acc"><button type="button" class="btn-icon danger" data-quitar-inv="${it.inventarioId}" title="Quitar todo el conteo de este producto"><span class="inv-solo-pc">Quitar</span><span class="inv-solo-movil">✕</span></button></td>
     </tr>${abierto ? detalleInventarioHoy(it) : ""}`;
 }
 function detalleInventarioHoy(it) {
@@ -1064,7 +1082,7 @@ function detalleInventarioHoy(it) {
     ? `Neto: <b>${fmt(t.neto, it.unidad)}</b>`
     : `Canastas: <b>${invKg(t.canastas)}</b> · Kilos brutos: <b>${invKg(t.bruto)} kg</b>${t.descKg ? ` · Descuentos: <b>${invKg(t.descKg)} kg</b>` : ""} · Neto: <b>${fmt(t.neto, it.unidad)}</b>`;
   return `
-    <tr class="inv-detalle"><td></td><td colspan="5">
+    <tr class="inv-detalle"><td></td><td colspan="4">
       <div class="inv-det-tot">${resumen}</div>
       <div class="table-wrap"><table class="inv-det-tabla">
         <thead><tr><th>#</th><th>Hora</th><th class="num">${und ? "Cantidad" : "Bruto"}</th><th class="num">Canastas</th><th class="num">Descuentos</th><th class="num">Neto</th><th>Nota</th><th></th></tr></thead>
