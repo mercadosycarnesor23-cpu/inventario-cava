@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Georama:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=4">
+<link rel="stylesheet" href="css/style.css?v=6">
 </head>
 <body>
 
@@ -61,25 +61,67 @@
 
   <!-- INVENTARIO -->
   <section class="tab-panel active" id="tab-inventario">
-    <div class="panel solo-editor">
+    <div class="panel solo-editor inv-registro">
       <div class="panel-title-row">
-        <h3>Registrar inventario (panel de ingresos)</h3>
-        <span class="hint">Busca el producto y agrégalo al inventario de hoy.</span>
+        <h3>Producto y pesadas</h3>
+        <span class="hint">Enter: producto → peso → canastas, y Enter en Canastas registra la pesada.</span>
       </div>
-      <div class="buscador-wrap">
-        <input type="text" id="buscarInventario" class="input-search" placeholder="Buscar por código o nombre...">
-        <div class="dropdown-resultados" id="dropdownInventario" hidden></div>
+      <div class="inv-linea-prod">
+        <div class="inv-fld inv-grow">
+          <label for="buscarInventario">Producto</label>
+          <div class="buscador-wrap">
+            <input type="text" id="buscarInventario" placeholder="Código o nombre..." autocomplete="off">
+            <div class="dropdown-resultados" id="dropdownInventario" hidden></div>
+          </div>
+        </div>
+        <label class="inv-fld inv-w-can">Canasta por pesada
+          <select id="invTipoCanasta"></select>
+        </label>
       </div>
-      <div class="panel-inline-form" id="formInventarioInline" hidden></div>
+      <div class="inv-prod-info" id="invProdInfo" hidden></div>
+      <div class="inv-linea-body">
+        <div class="inv-pesadas-box">
+          <table class="t-pesadas">
+            <thead><tr><th>#</th><th id="invThBruto">Peso bruto kg</th><th>Canastas</th><th class="num">Tara</th><th class="num">Neto</th><th></th></tr></thead>
+            <tbody>
+              <tr>
+                <td class="inv-pn" id="invPNum">P1</td>
+                <td><input id="invBruto" class="in-kg" inputmode="decimal" autocomplete="off" placeholder="0"></td>
+                <td><input id="invCanastas" class="in-can" inputmode="numeric" autocomplete="off" placeholder="0"></td>
+                <td class="num inv-tara" id="invTara">—</td>
+                <td class="num inv-neto" id="invNeto">—</td>
+                <td><button type="button" class="icon-x" id="invLimpiarPesada" title="Borrar esta pesada" tabindex="-1">✕</button></td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="inv-hint-neto">Sin canastas ni descuentos, el peso que escribas ya es el neto.</p>
+        </div>
+        <div class="inv-desc-box" id="invDescBox">
+          <div class="inv-sub-title">Descuentos</div>
+          <div id="invDescRows"></div>
+          <div class="desc-quick" id="invDescQuick"></div>
+        </div>
+      </div>
+      <div class="inv-pie">
+        <label class="inv-fld inv-grow">Nota (opcional)
+          <input type="text" id="invNota" autocomplete="off" placeholder="Ej.: revuelta, regular...">
+        </label>
+        <button type="button" class="btn-primary" id="btnRegistrarPesada">Registrar pesada</button>
+      </div>
     </div>
     <div class="panel">
       <div class="panel-title-row">
         <h3>Inventario de hoy</h3>
-        <button type="button" class="btn-ghost" id="btnCopiarExcel" title="Copia el inventario de hoy listo para pegar en tu Excel">⧉ Copiar para Excel</button>
+        <span class="hint" id="invHoyResumen"></span>
+        <button type="button" class="btn-ghost" id="btnCopiarExcel" title="Copia código, producto y kilos netos del día (sumadas todas las pesadas) para pegar en Excel">⧉ Copiar para Excel</button>
+      </div>
+      <div class="buscar-con-x inv-hoy-buscar">
+        <input type="text" id="buscarInvHoy" class="input-search" placeholder="Buscar en el inventario de hoy..." autocomplete="off">
+        <button type="button" class="buscar-x" id="buscarInvHoyX" aria-label="Borrar búsqueda" title="Borrar búsqueda" hidden>✕</button>
       </div>
       <div class="table-wrap">
-        <table>
-          <thead><tr><th>Código</th><th>Producto</th><th>Cantidad</th><th>Notas</th><th></th></tr></thead>
+        <table class="tabla-inv-hoy">
+          <thead><tr><th></th><th>Producto</th><th class="num">Cantidad</th><th class="num">Pesadas</th><th>Notas</th><th></th></tr></thead>
           <tbody id="tablaInventarioHoy"></tbody>
         </table>
       </div>
@@ -503,7 +545,7 @@
 <div id="areaImprimirCaja"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="js/config.js?v=4"></script>
-<script src="js/app.js?v=4"></script>
+<script src="js/config.js?v=6"></script>
+<script src="js/app.js?v=6"></script>
 </body>
 </html>
