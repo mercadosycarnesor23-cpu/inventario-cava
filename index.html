@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Georama:wght@600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/style.css?v=6">
+<link rel="stylesheet" href="css/style.css?v=8">
 </head>
 <body>
 
@@ -64,19 +64,24 @@
     <div class="panel solo-editor inv-registro">
       <div class="panel-title-row">
         <h3>Producto y pesadas</h3>
-        <span class="hint">Enter: producto → peso → canastas, y Enter en Canastas registra la pesada.</span>
+        <span class="hint inv-solo-pc">Enter: producto → peso → canastas, y Enter en Canastas registra la pesada.</span>
       </div>
       <div class="inv-linea-prod">
         <div class="inv-fld inv-grow">
           <label for="buscarInventario">Producto</label>
           <div class="buscador-wrap">
-            <input type="text" id="buscarInventario" placeholder="Código o nombre..." autocomplete="off">
+            <input type="text" id="buscarInventario" placeholder="Código o nombre..." autocomplete="off" enterkeyhint="next">
             <div class="dropdown-resultados" id="dropdownInventario" hidden></div>
           </div>
         </div>
-        <label class="inv-fld inv-w-can">Canasta por pesada
-          <select id="invTipoCanasta"></select>
-        </label>
+        <div class="inv-fld inv-w-can inv-plegable" id="invCanastaSec">
+          <button type="button" class="inv-plegable-cab" aria-expanded="false" aria-controls="invTipoCanasta">
+            <span class="inv-flecha">▸</span> Canasta por pesada <span class="inv-plegable-resumen" id="invCanastaResumen"></span>
+          </button>
+          <label class="inv-plegable-cuerpo"><span class="inv-solo-pc">Canasta por pesada</span>
+            <select id="invTipoCanasta"></select>
+          </label>
+        </div>
       </div>
       <div class="inv-prod-info" id="invProdInfo" hidden></div>
       <div class="inv-linea-body">
@@ -86,20 +91,25 @@
             <tbody>
               <tr>
                 <td class="inv-pn" id="invPNum">P1</td>
-                <td><input id="invBruto" class="in-kg" inputmode="decimal" autocomplete="off" placeholder="0"></td>
-                <td><input id="invCanastas" class="in-can" inputmode="numeric" autocomplete="off" placeholder="0"></td>
+                <td><input id="invBruto" class="in-kg" inputmode="decimal" autocomplete="off" placeholder="0" enterkeyhint="next"></td>
+                <td><input id="invCanastas" class="in-can" inputmode="numeric" autocomplete="off" placeholder="0" enterkeyhint="done"></td>
                 <td class="num inv-tara" id="invTara">—</td>
                 <td class="num inv-neto" id="invNeto">—</td>
                 <td><button type="button" class="icon-x" id="invLimpiarPesada" title="Borrar esta pesada" tabindex="-1">✕</button></td>
               </tr>
             </tbody>
           </table>
-          <p class="inv-hint-neto">Sin canastas ni descuentos, el peso que escribas ya es el neto.</p>
+          <p class="inv-hint-neto inv-solo-pc">Sin canastas ni descuentos, el peso que escribas ya es el neto.</p>
         </div>
-        <div class="inv-desc-box" id="invDescBox">
-          <div class="inv-sub-title">Descuentos</div>
-          <div id="invDescRows"></div>
-          <div class="desc-quick" id="invDescQuick"></div>
+        <div class="inv-desc-box inv-plegable" id="invDescBox">
+          <button type="button" class="inv-plegable-cab" aria-expanded="false" aria-controls="invDescCuerpo">
+            <span class="inv-flecha">▸</span> Descuentos <span class="inv-plegable-resumen" id="invDescResumen"></span>
+          </button>
+          <div class="inv-sub-title inv-solo-pc">Descuentos</div>
+          <div class="inv-plegable-cuerpo" id="invDescCuerpo">
+            <div id="invDescRows"></div>
+            <div class="desc-quick" id="invDescQuick"></div>
+          </div>
         </div>
       </div>
       <div class="inv-pie">
@@ -121,7 +131,7 @@
       </div>
       <div class="table-wrap">
         <table class="tabla-inv-hoy">
-          <thead><tr><th></th><th>Producto</th><th class="num">Cantidad</th><th class="num">Pesadas</th><th>Notas</th><th></th></tr></thead>
+          <thead><tr><th></th><th>Producto</th><th class="num">Cantidad</th><th class="num"><span class="inv-solo-pc">Pesadas</span><span class="inv-solo-movil" title="Pesadas">Pes.</span></th><th></th></tr></thead>
           <tbody id="tablaInventarioHoy"></tbody>
         </table>
       </div>
@@ -545,7 +555,7 @@
 <div id="areaImprimirCaja"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script src="js/config.js?v=6"></script>
-<script src="js/app.js?v=6"></script>
+<script src="js/config.js?v=8"></script>
+<script src="js/app.js?v=8"></script>
 </body>
 </html>
