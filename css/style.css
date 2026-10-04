@@ -445,6 +445,10 @@ body.rol-platano .tab-panel:not(#tab-platano) .btn-icon { display: none !importa
 .desc-quick .d-add { border-style: solid; color: var(--azul); font-weight: 700; }
 .inv-pie { display: flex; gap: 12px; align-items: end; margin-top: 14px; padding-top: 12px; border-top: 1px dashed var(--border); }
 .inv-pie .btn-primary { height: 42px; white-space: nowrap; }
+/* Secciones plegables (solo en celular: "Canasta por pesada" y "Descuentos") */
+.inv-plegable-cab { display: none; }
+.inv-solo-movil { display: none; }
+.inv-w-can .inv-plegable-cuerpo { display: flex; flex-direction: column; gap: 6px; }
 
 /* Inventario de hoy: buscador y desplegable con las pesadas (canastas y kilos brutos) */
 .inv-hoy-buscar { margin-bottom: 10px; }
@@ -454,6 +458,7 @@ body.rol-platano .tab-panel:not(#tab-platano) .btn-icon { display: none !importa
 .inv-fila.abierta .inv-flecha { transform: rotate(90deg); }
 .inv-fila.abierta td { background: var(--azul-claro); }
 .inv-acc { white-space: nowrap; text-align: right; }
+.inv-nota-fila { margin-top: 2px; font-size: 12px; color: var(--muted); font-style: italic; }
 .inv-detalle > td { background: #fafbfd; padding-top: 6px; padding-bottom: 12px; }
 .inv-det-tot { font-size: 13px; color: var(--muted); margin-bottom: 6px; }
 .inv-det-tot b { color: var(--ink); }
@@ -463,11 +468,44 @@ body.rol-platano .tab-panel:not(#tab-platano) .btn-icon { display: none !importa
 .inv-det-tabla small { color: var(--muted); }
 
 @media (max-width: 720px) {
-  .inv-linea-prod, .inv-linea-body { grid-template-columns: 1fr; gap: 12px; }
-  .t-pesadas .in-kg { width: 110px; }
-  .t-pesadas .in-can { width: 64px; }
-  .t-pesadas thead th, .t-pesadas tbody td { padding-left: 4px; padding-right: 4px; }
-  .inv-pie { flex-direction: column; align-items: stretch; }
+  .inv-linea-prod, .inv-linea-body { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .inv-linea-body { margin-top: 10px; }
+  /* La fila de la pesada ocupa todo el ancho: el peso bruto toma lo que sobra */
+  .t-pesadas { width: 100%; table-layout: fixed; }
+  .t-pesadas th:nth-child(1) { width: 28px; }
+  .t-pesadas th:nth-child(3) { width: 62px; }
+  .t-pesadas th:nth-child(4) { width: 46px; }
+  .t-pesadas th:nth-child(5) { width: 50px; }
+  .t-pesadas th:nth-child(6) { width: 28px; }
+  .t-pesadas thead th, .t-pesadas tbody td { padding-left: 3px; padding-right: 3px; }
+  .t-pesadas thead th { font-size: 12px; white-space: normal; }
+  .t-pesadas .in-kg, .t-pesadas .in-can { width: 100%; padding: 0 8px; }
+  .inv-tara, .inv-neto { min-width: 0; font-size: 13px; }
+  .icon-x { padding: 4px 2px; }
+  .desc-row input[data-df="cant"] { width: 52px; }
+  .desc-row input[data-df="kg"] { width: 62px; }
+  .desc-row .d-sub { display: none; }
+  .inv-pie { flex-direction: column; align-items: stretch; margin-top: 10px; }
+  .inv-solo-pc { display: none; }
+  .inv-plegable-cab {
+    display: flex; align-items: center; gap: 8px; width: 100%; padding: 9px 12px;
+    border: 1px solid var(--border); border-radius: 8px; background: #fff; cursor: pointer;
+    font: inherit; font-size: 14px; font-weight: 600; color: var(--ink); text-align: left;
+  }
+  .inv-plegable-resumen { margin-left: auto; color: var(--muted); font-size: 13px; }
+  .inv-plegable.abierto .inv-flecha { transform: rotate(90deg); }
+  .inv-plegable.abierto .inv-plegable-cab { margin-bottom: 8px; }
+  .inv-plegable:not(.abierto) .inv-plegable-cuerpo { display: none; }
+  /* Inventario de hoy con anchos fijos: el producto toma lo que sobra y el
+     detalle de pesadas se desliza dentro de su desplegable. */
+  .tabla-inv-hoy { table-layout: fixed; }
+  .tabla-inv-hoy > thead th:nth-child(1) { width: 24px; }
+  .tabla-inv-hoy > thead th:nth-child(3) { width: 76px; }
+  .tabla-inv-hoy > thead th:nth-child(4) { width: 42px; }
+  .tabla-inv-hoy > thead th:nth-child(5) { width: 40px; }
+  .tabla-inv-hoy th, .tabla-inv-hoy .inv-fila td { padding-left: 5px; padding-right: 5px; }
+  .tabla-inv-hoy .inv-fila td:nth-child(2) { overflow-wrap: anywhere; }
+  .inv-solo-movil { display: inline; }
 }
 
 /* ---------- Hojas de impresion (sugerido y caja menor) ---------- */
