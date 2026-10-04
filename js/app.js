@@ -632,6 +632,9 @@ const INV_DESC_RAPIDOS = [
 let invProd = null;            // producto elegido en el panel
 let invDescs = [{ cant: "", kg: "", concepto: "" }];
 let invGuardando = false;
+let invCola = Promise.resolve();
+const invPendientes = new Map(); // productoId -> pesadas que se están guardando
+const invFallidas = [];           // pesadas que no se pudieron guardar (para avisar juntas)
 let invSinColumnaPesadas = false; // todavía no se corrió migration_v12.sql
 let invAvisoMigracion = false;
 const invAbiertos = new Set();  // productos con el desplegable abierto en "Inventario de hoy"
@@ -718,8 +721,8 @@ async function invGuardarFila(id, datos) {
 // La primera pesada del día deja el stock en lo contado; las siguientes (o quitar
 // una) lo mueven solo por la diferencia, para no borrar lo que ya se haya
 // despachado después. Si hay movimientos de un día posterior, ese stock manda.
-async function ajustarStockPorConteo(productoId, fecha, valorAnterior, valorNuevo, esPrimera) {
-  const s = await fetchStockRow(productoId);
+// Recibe la fila de stock ya leída (se lee junto con el conteo, en paralelo).
+async function ajustarStockPorConteo(productoId, fecha, valorAnterior, valorNuevo, esPrimera, s) {
   if (s && s.fecha > fecha) return;
   const desdeCero = esPrimera || !s;
   const fila = {
@@ -739,10 +742,18 @@ function invAplicarFila(row) {
   renderDespachoHoy();
 }
 
-async function guardarPesadaInventario(p, fecha, pesada, motivoEdicion, motivoEdicionNota) {
-  const { data: existentes, error } = await sb.from("inventarios").select("*").eq("producto_id", p.id).eq("fecha", fecha);
+// Lee el conteo del producto en esa fecha y su stock al mismo tiempo (una sola espera).
+async function leerConteoYStock(productoId, fecha) {
+  const [{ data: filas, error }, stockRow] = await Promise.all([
+    sb.from("inventarios").select("*").eq("producto_id", productoId).eq("fecha", fecha),
+    fetchStockRow(productoId),
+  ]);
   throwIfError(error);
-  const existente = existentes && existentes.length ? existentes[0] : null;
+  return { row: filas && filas.length ? filas[0] : null, stockRow };
+}
+
+async function guardarPesadaInventario(p, fecha, pesada, motivoEdicion, motivoEdicionNota) {
+  const { row: existente, stockRow } = await leerConteoYStock(p.id, fecha);
   if (existente && fecha !== todayISO() && !motivoEdicion) return { requiereMotivoEdicion: true };
 
   const pesadas = [...(existente ? pesadasDeInventario(existente) : []), pesada];
@@ -751,9 +762,11 @@ async function guardarPesadaInventario(p, fecha, pesada, motivoEdicion, motivoEd
   const row = await invGuardarFila(existente ? existente.id : null, existente
     ? { ...datos, hora: pesada.hora }
     : { ...datos, producto_id: p.id, fecha, hora: pesada.hora });
-  // Ya no se compara con el día anterior: se limpian diferencias viejas de este conteo.
-  if (existente) await sb.from("diferencias").delete().eq("inventario_id", row.id);
-  await ajustarStockPorConteo(p.id, fecha, anterior, datos.valor, !existente);
+  await Promise.all([
+    // Ya no se compara con el día anterior: se limpian diferencias viejas de este conteo.
+    existente ? sb.from("diferencias").delete().eq("inventario_id", row.id) : null,
+    ajustarStockPorConteo(p.id, fecha, anterior, datos.valor, !existente, stockRow),
+  ]);
   if (existente && fecha !== todayISO()) {
     await registrarCorreccion({
       tipo: "sumar", productoId: p.id, fecha, valorAnterior: anterior, valorNuevo: datos.valor,
@@ -769,9 +782,7 @@ async function quitarPesadaInventario(productoId, idx, motivoEdicion, motivoEdic
   const p = productosPorId[productoId];
   const fecha = fechaTrabajo();
   try {
-    const { data: filas, error } = await sb.from("inventarios").select("*").eq("producto_id", productoId).eq("fecha", fecha);
-    throwIfError(error);
-    const row = filas && filas.length ? filas[0] : null;
+    const { row, stockRow } = await leerConteoYStock(productoId, fecha);
     if (!row || !p) { toast("Ese conteo ya no existe", true); await refrescarTodo(); return; }
     const pesadas = pesadasDeInventario(row);
     if (pesadas.length <= 1) { await quitarInventario(row.id); return; }
@@ -790,7 +801,7 @@ async function quitarPesadaInventario(productoId, idx, motivoEdicion, motivoEdic
     }
     const datos = datosInventarioDesdePesadas(p, pesadas.filter((_, i) => i !== idx));
     const nueva = await invGuardarFila(row.id, datos);
-    await ajustarStockPorConteo(productoId, fecha, Number(row.valor), datos.valor, false);
+    await ajustarStockPorConteo(productoId, fecha, Number(row.valor), datos.valor, false, stockRow);
     if (fecha !== todayISO()) {
       await registrarCorreccion({
         tipo: "editar", productoId, fecha, valorAnterior: Number(row.valor), valorNuevo: datos.valor,
@@ -852,10 +863,12 @@ function invRefrescarInfo() {
   if (!invProd) { info.hidden = true; document.getElementById("invPNum").textContent = "P1"; return; }
   const it = estado.find(e => e.id === invProd.id);
   const previas = it && it.inventariadoHoy ? it.inventarioHoyPesadas.length : 0;
-  document.getElementById("invPNum").textContent = "P" + (previas + 1);
+  const enCamino = invPendientes.get(invProd.id) || 0;
+  document.getElementById("invPNum").textContent = "P" + (previas + enCamino + 1);
   info.innerHTML = `Cód. <b>${escapeHtml(invProd.codigo)}</b> · ${escapeHtml(invProd.unidad)} · ` + (previas
     ? `Ya van <b>${fmt(it.inventarioHoyValor, invProd.unidad)}</b> en ${previas} pesada${previas > 1 ? "s" : ""}: esta se suma`
-    : "Primera pesada del día");
+    : (enCamino ? "Se suma a la que se está guardando" : "Primera pesada del día"))
+    + (previas && enCamino ? ` (+${enCamino} guardándose)` : "");
   info.hidden = false;
 }
 function invRenderDescs() {
@@ -894,6 +907,37 @@ function invLimpiarPesada(tambienProducto) {
   invRenderDescs();
   invRefrescarInfo();
 }
+// Las pesadas de hoy se guardan por detrás y en fila (una tras otra, para que
+// dos pesadas del mismo producto no se pisen): el panel queda listo al instante
+// para la siguiente, sin esperar a Supabase.
+function invTotalPendientes() {
+  let n = 0;
+  invPendientes.forEach(v => { n += v; });
+  return n;
+}
+function invMostrarPendientes() {
+  const n = invTotalPendientes();
+  const el = document.getElementById("invEstadoGuardado");
+  el.hidden = !n;
+  el.textContent = n ? `Guardando ${n} pesada${n > 1 ? "s" : ""}…` : "";
+}
+function invAvisarFallidas() {
+  abrirModal("No se guardaron estas pesadas", `
+    <div class="modal-body-grid">
+      <div class="alerta-box">Revisa la conexión a internet y vuelve a registrarlas:<br>${invFallidas.map(f => `• ${escapeHtml(f)}`).join("<br>")}</div>
+    </div>
+  `, { textoConfirmar: "Entendido", ocultarCancelar: true, onConfirm: () => { invFallidas.length = 0; cerrarModal(); } });
+}
+function invAvisoSiFaltaMigracion() {
+  if (!invSinColumnaPesadas || invAvisoMigracion) return;
+  invAvisoMigracion = true;
+  setTimeout(() => toast("Guardado. Para ver el detalle de cada pesada falta correr migration_v12.sql en Supabase.", true), 3400);
+}
+// Si se intenta cerrar la página con pesadas guardándose, el navegador pregunta antes.
+window.addEventListener("beforeunload", (e) => {
+  if (invTotalPendientes() > 0) { e.preventDefault(); e.returnValue = ""; }
+});
+
 async function invRegistrarPesada(motivoEdicion, motivoEdicionNota) {
   if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes guardar cambios.", true); return; }
   if (invGuardando) return;
@@ -908,6 +952,31 @@ async function invRegistrarPesada(motivoEdicion, motivoEdicionNota) {
   const nota = document.getElementById("invNota").value.trim();
   if (nota) pesada.nota = nota;
 
+  // Hoy: el panel queda limpio de una y la pesada se guarda por detrás.
+  if (fecha === todayISO()) {
+    invPendientes.set(p.id, (invPendientes.get(p.id) || 0) + 1);
+    invMostrarPendientes();
+    invLimpiarPesada(true);
+    document.getElementById("buscarInventario").focus();
+    invCola = invCola.then(async () => {
+      try {
+        const r = await guardarPesadaInventario(p, fecha, pesada);
+        toast(`✓ Pesada ${r.n} · ${p.nombre}: ${fmt(pesada.neto, p.unidad)}${r.n > 1 ? ` · total del día ${fmt(r.total, p.unidad)}` : ""}`);
+        invAvisoSiFaltaMigracion();
+      } catch (err) {
+        invFallidas.push(`${p.nombre}: ${fmt(pesada.neto, p.unidad)} (${err.message || "error"})`);
+        invAvisarFallidas();
+      } finally {
+        const quedan = (invPendientes.get(p.id) || 1) - 1;
+        if (quedan > 0) invPendientes.set(p.id, quedan); else invPendientes.delete(p.id);
+        invMostrarPendientes();
+        invRefrescarInfo();
+      }
+    });
+    return;
+  }
+
+  // Día anterior: se espera a guardar, porque puede pedir el motivo del cambio.
   invGuardando = true;
   const btn = document.getElementById("btnRegistrarPesada");
   btn.disabled = true;
@@ -922,10 +991,7 @@ async function invRegistrarPesada(motivoEdicion, motivoEdicionNota) {
       return;
     }
     toast(`✓ Pesada ${r.n} · ${p.nombre}: ${fmt(pesada.neto, p.unidad)}${r.n > 1 ? ` · total del día ${fmt(r.total, p.unidad)}` : ""}`);
-    if (invSinColumnaPesadas && !invAvisoMigracion) {
-      invAvisoMigracion = true;
-      setTimeout(() => toast("Guardado. Para ver el detalle de cada pesada falta correr migration_v12.sql en Supabase.", true), 3400);
-    }
+    invAvisoSiFaltaMigracion();
     invLimpiarPesada(true);
     document.getElementById("buscarInventario").focus();
   } catch (err) {
