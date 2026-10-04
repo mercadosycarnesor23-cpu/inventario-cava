@@ -6,7 +6,6 @@
 
 const MOTIVOS = ["Merma / daño", "Consumo interno", "Error de conteo", "Robo / pérdida", "Ajuste", "Otro"];
 const MOTIVOS_CORRECCION = ["Error de edición", "Código incorrecto", "Peso/kilaje incorrecto", "Otro"];
-const TOLERANCIA = 0.01;
 
 const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 
@@ -307,6 +306,11 @@ async function cargarProductos() {
   productos.forEach(p => { productosPorId[p.id] = p; });
 }
 
+// Datos de la fecha de trabajo guardados en memoria. Los llena cargarEstado() y
+// el tiempo real los actualiza al instante cuando otro equipo guarda algo, sin
+// volver a descargar todo.
+const diaCache = { fecha: null, stock: new Map(), inv: new Map(), desp: new Map(), sug: new Map() };
+
 async function cargarEstado() {
   const fecha = fechaTrabajo();
   const [{ data: stockRows, error: e1 }, { data: invHoy, error: e2 }, { data: despHoy, error: e3 }, { data: sugHoy, error: e4 }] = await Promise.all([
@@ -316,15 +320,23 @@ async function cargarEstado() {
     sb.from("sugeridos").select("*").eq("fecha", fecha),
   ]);
   throwIfError(e1); throwIfError(e2); throwIfError(e3); throwIfError(e4);
+  diaCache.fecha = fecha;
+  diaCache.stock = new Map((stockRows || []).map(r => [r.producto_id, r]));
+  diaCache.inv = new Map((invHoy || []).map(r => [r.id, r]));
+  diaCache.desp = new Map((despHoy || []).map(r => [r.id, r]));
+  diaCache.sug = new Map((sugHoy || []).map(r => [r.producto_id, r]));
+  construirEstado();
+}
 
+function construirEstado() {
   const stockPorProd = {};
-  (stockRows || []).forEach(r => { stockPorProd[r.producto_id] = r; });
+  diaCache.stock.forEach(r => { stockPorProd[r.producto_id] = r; });
 
   const invPorProd = {};
-  (invHoy || []).map(mapInventario).forEach(r => { invPorProd[r.productoId] = r; }); // un solo registro por producto y fecha
+  diaCache.inv.forEach(r => { invPorProd[r.producto_id] = r; }); // un solo registro por producto y fecha
 
   const despPorProd = {};
-  (despHoy || []).map(mapDespacho).forEach(r => {
+  Array.from(diaCache.desp.values()).map(mapDespacho).forEach(r => {
     if (!despPorProd[r.productoId]) despPorProd[r.productoId] = { total: 0, bello: 0, colores: 0, expres: 0 };
     despPorProd[r.productoId].total += r.totalDespachado;
     despPorProd[r.productoId].bello += r.bello;
@@ -333,11 +345,12 @@ async function cargarEstado() {
   });
 
   const sugPorProd = {};
-  (sugHoy || []).forEach(r => { sugPorProd[r.producto_id] = r; });
+  diaCache.sug.forEach(r => { sugPorProd[r.producto_id] = r; });
 
   estado = productos.map(p => {
     const s = stockPorProd[p.id];
-    const inv = invPorProd[p.id];
+    const invRow = invPorProd[p.id];
+    const inv = invRow ? mapInventario(invRow) : null;
     const d = despPorProd[p.id] || { total: 0, bello: 0, colores: 0, expres: 0 };
     const sug = sugPorProd[p.id];
     return {
@@ -348,6 +361,7 @@ async function cargarEstado() {
       inventarioHoyHora: inv ? inv.hora : null,
       inventarioHoyPesoBruto: inv ? inv.pesoBruto : null,
       inventarioHoyNumCanastas: inv ? inv.numCanastas : null,
+      inventarioHoyPesadas: invRow ? pesadasDeInventario(invRow) : [],
       despachadoHoyTotal: d.total, despachadoHoyBello: d.bello, despachadoHoyColores: d.colores, despachadoHoyExpres: d.expres,
       sugeridoBello: sug ? Number(sug.bello) : 0, sugeridoColores: sug ? Number(sug.colores) : 0, sugeridoExpres: sug ? Number(sug.puntos_expres) : 0,
       tieneSugerido: !!sug,
@@ -389,21 +403,59 @@ async function refrescarTodo() {
    BUSCADOR CON SUGERENCIAS (compartido por Inventario y Despacho)
    ========================================================================== */
 
-function buscarProductosPorTexto(texto, limite = 8) {
-  if (!texto) return [];
-  texto = texto.toLowerCase();
-  return productos
-    .filter(p => p.codigo.toLowerCase().includes(texto) || p.nombre.toLowerCase().includes(texto))
-    .slice(0, limite);
+// Texto para buscar: sin tildes, en mayúsculas y sin espacios de más (en el
+// catálogo hay nombres con espacios dobles, como "TOMATE CHERRY   X 500 G").
+function normBusqueda(s) {
+  return normalizarNombreSugerido(s).replace(/\s+/g, " ");
+}
+// Todas las palabras buscadas aparecen en alguno de los textos, en cualquier orden.
+function coincideBusqueda(q, ...textos) {
+  const donde = textos.map(normBusqueda).join(" ");
+  return q.split(" ").every(palabra => donde.includes(palabra));
 }
 
+// Primero el código exacto, luego los que empiezan igual y al final los que
+// solo contienen las palabras (sin importar tildes, mayúsculas ni el orden).
+function buscarProductosPorTexto(texto, limite = 8) {
+  const q = normBusqueda(texto);
+  if (!q) return [];
+  const encontrados = [];
+  for (const p of productos) {
+    const cod = normBusqueda(p.codigo);
+    const nom = normBusqueda(p.nombre);
+    let puntos = -1;
+    if (cod === q) puntos = 0;
+    else if (cod.startsWith(q)) puntos = 1;
+    else if (nom.startsWith(q)) puntos = 2;
+    else if ((" " + nom).includes(" " + q)) puntos = 3;
+    else if (coincideBusqueda(q, nom, cod)) puntos = 4;
+    if (puntos >= 0) encontrados.push({ puntos, p });
+  }
+  encontrados.sort((a, b) => a.puntos - b.puntos || a.p.nombre.localeCompare(b.p.nombre, "es"));
+  return encontrados.slice(0, limite).map(x => x.p);
+}
+
+// Buscador con lista desplegable: flechas arriba/abajo para moverse, Enter
+// elige el resaltado (por defecto el primero) y Esc cierra la lista.
 function wireAutocomplete(inputId, dropdownId, onSelect) {
   const input = document.getElementById(inputId);
   const dropdown = document.getElementById(dropdownId);
+  let resultados = [];
+  let activo = 0;
+  const pintarActivo = (desplazar) => {
+    dropdown.querySelectorAll("[data-id]").forEach((el, i) => el.classList.toggle("activo", i === activo));
+    if (desplazar) dropdown.querySelector(".dropdown-item.activo")?.scrollIntoView({ block: "nearest" });
+  };
+  const elegir = (id) => {
+    dropdown.hidden = true;
+    input.value = "";
+    onSelect(id);
+  };
   input.addEventListener("input", () => {
     const texto = input.value.trim();
-    if (!texto) { dropdown.hidden = true; return; }
-    const resultados = buscarProductosPorTexto(texto);
+    if (!texto) { dropdown.hidden = true; resultados = []; return; }
+    resultados = buscarProductosPorTexto(texto);
+    activo = 0;
     dropdown.innerHTML = resultados.map(p => `
       <div class="dropdown-item" data-id="${p.id}">
         <span>${escapeHtml(p.nombre)}</span>
@@ -411,13 +463,24 @@ function wireAutocomplete(inputId, dropdownId, onSelect) {
       </div>
     `).join("") || `<div class="dropdown-empty">Sin resultados</div>`;
     dropdown.hidden = false;
-    dropdown.querySelectorAll("[data-id]").forEach(el => {
-      el.addEventListener("click", () => {
-        dropdown.hidden = true;
-        input.value = "";
-        onSelect(el.dataset.id);
-      });
-    });
+    pintarActivo(false);
+  });
+  input.addEventListener("keydown", (e) => {
+    if (dropdown.hidden || !resultados.length) return;
+    if (e.key === "ArrowDown") { e.preventDefault(); activo = (activo + 1) % resultados.length; pintarActivo(true); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); activo = (activo - 1 + resultados.length) % resultados.length; pintarActivo(true); }
+    else if (e.key === "Enter") { e.preventDefault(); elegir(resultados[activo].id); }
+    else if (e.key === "Escape") { dropdown.hidden = true; }
+  });
+  dropdown.addEventListener("click", (e) => {
+    const el = e.target.closest("[data-id]");
+    if (el) elegir(el.dataset.id);
+  });
+  dropdown.addEventListener("mousemove", (e) => {
+    const el = e.target.closest("[data-id]");
+    if (!el) return;
+    const i = resultados.findIndex(p => p.id === el.dataset.id);
+    if (i >= 0 && i !== activo) { activo = i; pintarActivo(false); }
   });
   document.addEventListener("click", (e) => {
     if (e.target !== input && !dropdown.contains(e.target)) dropdown.hidden = true;
@@ -428,29 +491,9 @@ function wireAutocomplete(inputId, dropdownId, onSelect) {
    INVENTARIO
    ========================================================================== */
 
-function renderInventarioHoy() {
-  const tbody = document.getElementById("tablaInventarioHoy");
-  const filas = estado.filter(it => it.inventariadoHoy);
-  tbody.innerHTML = filas.map(it => `
-    <tr>
-      <td>${escapeHtml(it.codigo)}</td>
-      <td>${escapeHtml(it.nombre)}</td>
-      <td>${fmt(it.inventarioHoyValor, it.unidad)}</td>
-      <td>${escapeHtml(it.inventarioHoyNotas || "-")}</td>
-      <td>
-        <button class="btn-icon" data-editar-inv="${it.id}">Editar</button>
-        <button class="btn-icon danger" data-quitar-inv="${it.inventarioId}">Quitar</button>
-      </td>
-    </tr>
-  `).join("") || `<tr class="empty-row"><td colspan="5">Todavía no has agregado productos al inventario de hoy.</td></tr>`;
-
-  tbody.querySelectorAll("[data-editar-inv]").forEach(b => b.addEventListener("click", () => seleccionarProductoInventario(b.dataset.editarInv, true)));
-  tbody.querySelectorAll("[data-quitar-inv]").forEach(b => b.addEventListener("click", () => quitarInventario(b.dataset.quitarInv)));
-}
-
-/* Copiar el inventario de hoy al portapapeles en columnas separadas por tabulador,
-   en el mismo orden de Libro1.xlsx: Peso bruto, Canastas 2.2, (C,D,E vacías),
-   Codigo, producto, Peso neto, Destino, Salida, Fecha, Hora. Al pegarlo con Ctrl+V
+/* Copiar el inventario de hoy al portapapeles en tres columnas separadas por
+   tabulador: Código, Producto y Kilos netos consolidados (la suma de todas las
+   pesadas del día; en productos por unidad, la cantidad). Al pegarlo con Ctrl+V
    en Excel cada valor cae en su propia columna. */
 function numExcel(n) {
   if (n === null || n === undefined) return "";
@@ -464,18 +507,7 @@ function fechaExcel(iso) {
 async function copiarInventarioParaExcel() {
   const filas = estado.filter(it => it.inventariadoHoy);
   if (filas.length === 0) { toast("No hay productos en el inventario de hoy todavía", true); return; }
-  const fechaTexto = fechaExcel(fechaTrabajo());
-  const lineas = filas.map(it => {
-    const esKg = it.unidad === "KG";
-    const bruto = esKg ? numExcel(it.inventarioHoyPesoBruto !== null ? it.inventarioHoyPesoBruto : it.inventarioHoyValor) : "";
-    const canastas = esKg ? numExcel(it.inventarioHoyNumCanastas !== null ? it.inventarioHoyNumCanastas : 0) : "";
-    const columnas = [
-      bruto, canastas, "", "", "",
-      it.codigo, it.nombre, numExcel(it.inventarioHoyValor),
-      "INVENTARIO", "1", fechaTexto, it.inventarioHoyHora || "",
-    ];
-    return columnas.join("\t");
-  });
+  const lineas = filas.map(it => [it.codigo, it.nombre, numExcel(it.inventarioHoyValor)].join("\t"));
   const texto = lineas.join("\n");
   try {
     await navigator.clipboard.writeText(texto);
@@ -507,113 +539,6 @@ function abrirModalMotivoCorreccion(titulo, mensajeExtra, onConfirmar) {
       onConfirmar(motivo, nota);
     },
   });
-}
-
-// Guarda el conteo de inventario. Devuelve { requiereMotivo } si el conteo no
-// coincide con el stock esperado, o { requiereMotivoEdicion } si el registro
-// que se esta tocando es de un dia anterior al de hoy (real), en vez de guardar
-// directamente -- asi la UI pide el motivo antes de continuar.
-async function guardarInventario(p, cuerpo) {
-  if (esSoloLectura()) throw new Error("Estás en modo solo lectura, no puedes guardar cambios.");
-  const numCanastas = Number(cuerpo.numCanastas) || 0;
-  const pesoCanasta = Number(cuerpo.pesoCanasta) > 0 ? Number(cuerpo.pesoCanasta) : 2.2;
-  const valorIngresado = Number(cuerpo.valor) || 0;
-  let modo = "neto";
-  let valorEntrada = valorIngresado;
-  if (p.unidad === "UND") {
-    modo = "unidad";
-  } else if (numCanastas > 0) {
-    modo = "bruto";
-    valorEntrada = valorIngresado - (numCanastas * pesoCanasta);
-  }
-  if (valorEntrada < 0) throw new Error("El valor calculado es negativo, revisa canastas/peso");
-
-  const { data: existentesHoy, error: eExist } = await sb.from("inventarios").select("*")
-    .eq("producto_id", p.id).eq("fecha", cuerpo.fecha);
-  throwIfError(eExist);
-  const existenteHoy = (existentesHoy && existentesHoy.length > 0) ? existentesHoy[0] : null;
-  const acumular = !!cuerpo.acumular && !!existenteHoy;
-
-  const hoyReal = todayISO();
-  const esEdicionDiaAnterior = !!existenteHoy && existenteHoy.fecha !== hoyReal;
-  if (esEdicionDiaAnterior && !cuerpo.motivoEdicion) {
-    return { requiereMotivoEdicion: true, fecha: existenteHoy.fecha, valorActual: Number(existenteHoy.valor), unidad: p.unidad };
-  }
-
-  const stockRow = await fetchStockRow(p.id);
-  const anterior = stockRow ? Number(stockRow.valor) : null;
-
-  let valor;
-  if (acumular) {
-    valor = Number(existenteHoy.valor) + valorEntrada;
-  } else {
-    valor = valorEntrada;
-    if (anterior !== null && Math.abs(valor - anterior) > TOLERANCIA && !cuerpo.motivo) {
-      return { requiereMotivo: true, valorEsperado: anterior, valorNuevo: valor, unidad: p.unidad };
-    }
-  }
-
-  let invRow;
-  if (existenteHoy) {
-    const patch = { valor, hora: horaActual() };
-    if (acumular) {
-      patch.modo = modo;
-      if (modo === "bruto") {
-        const prevBruto = Number(existenteHoy.peso_bruto) || 0;
-        const prevCanastas = Number(existenteHoy.num_canastas) || 0;
-        patch.peso_bruto = prevBruto + valorIngresado;
-        patch.num_canastas = prevCanastas + numCanastas;
-        patch.peso_canasta = pesoCanasta;
-      } else {
-        patch.peso_bruto = null; patch.num_canastas = null; patch.peso_canasta = null;
-      }
-      const notaNueva = (cuerpo.notas || "").trim();
-      const notaPrevia = (existenteHoy.notas || "").trim();
-      patch.notas = notaNueva && notaPrevia ? `${notaPrevia}; ${notaNueva}` : (notaNueva || notaPrevia || null);
-    } else {
-      patch.modo = modo;
-      patch.peso_bruto = modo === "bruto" ? valorIngresado : null;
-      patch.num_canastas = modo === "bruto" ? numCanastas : null;
-      patch.peso_canasta = modo === "bruto" ? pesoCanasta : null;
-      patch.notas = cuerpo.notas || null;
-    }
-    const { data, error } = await sb.from("inventarios").update(patch).eq("id", existenteHoy.id).select().single();
-    throwIfError(error);
-    invRow = data;
-    await sb.from("diferencias").delete().eq("inventario_id", invRow.id);
-  } else {
-    const { data, error } = await sb.from("inventarios").insert({
-      producto_id: p.id, fecha: cuerpo.fecha, hora: horaActual(), modo,
-      peso_bruto: modo === "bruto" ? valorIngresado : null,
-      num_canastas: modo === "bruto" ? numCanastas : null,
-      peso_canasta: modo === "bruto" ? pesoCanasta : null,
-      valor, notas: cuerpo.notas || null,
-    }).select().single();
-    throwIfError(error);
-    invRow = data;
-  }
-
-  let diferencia = null;
-  if (!acumular && anterior !== null && Math.abs(valor - anterior) > TOLERANCIA) {
-    const { data: difRow, error: e2 } = await sb.from("diferencias").insert({
-      producto_id: p.id, fecha: cuerpo.fecha, valor_esperado: anterior, valor_real: valor,
-      diferencia: valor - anterior, motivo: cuerpo.motivo || null, nota: cuerpo.motivoNota || null,
-      inventario_id: invRow.id,
-    }).select().single();
-    throwIfError(e2);
-    diferencia = mapDiferencia(difRow);
-  }
-
-  if (esEdicionDiaAnterior) {
-    await registrarCorreccion({
-      tipo: acumular ? "sumar" : "editar", productoId: p.id, fecha: invRow.fecha,
-      valorAnterior: existenteHoy ? Number(existenteHoy.valor) : null, valorNuevo: valor,
-      motivo: cuerpo.motivoEdicion, nota: cuerpo.motivoEdicionNota, inventarioId: invRow.id,
-    });
-  }
-
-  await upsertStock(p.id, valor, cuerpo.fecha, "inventario");
-  return { inventario: mapInventario(invRow), diferencia };
 }
 
 // Elimina un conteo. Devuelve { requiereMotivoEdicion } en vez de borrar si el
@@ -680,183 +605,504 @@ async function quitarInventario(inventarioId) {
   }
 }
 
-function seleccionarProductoInventario(productoId, modoEdicion = false) {
-  const p = productosPorId[productoId];
-  const it = estado.find(e => e.id === productoId);
-  if (!p) return;
-  const container = document.getElementById("formInventarioInline");
-  container.hidden = false;
+/* ---------- Registro rápido por pesadas ----------
+   Producto (flechas + Enter) → Peso bruto (Enter) → Canastas (Enter = registra).
+   Neto = bruto − canastas × tara − descuentos; sin canastas ni descuentos el
+   peso ya es neto. Si el producto ya tiene conteo ese día, la pesada se SUMA y
+   queda el detalle de cada una (columna "pesadas"). El conteo de cada día va
+   solo: no se compara con el día anterior (no todos los despachos pasan por
+   esta app), por eso ya no se pide motivo de diferencia. */
 
-  const yaHoy = it.inventariadoHoy;
-  const acumulando = yaHoy && !modoEdicion;
+const INV_CANASTAS = [
+  { nombre: "Canasta 2.2", kg: 2.2 },
+  { nombre: "Canasta 1.6", kg: 1.6 },
+  { nombre: "Canasta 1.8", kg: 1.8 },
+  { nombre: "Canasta 2.0", kg: 2 },
+  { nombre: "Canasta 2.3", kg: 2.3 },
+  { nombre: "Canasta 2.5", kg: 2.5 },
+  { nombre: "Canasta 2.8", kg: 2.8 },
+];
+const INV_DESC_RAPIDOS = [
+  { concepto: "Carreta", kg: 22.6 },
+  { concepto: "Caja cartón", kg: 0.5 },
+  { concepto: "Carreta", kg: 33.8 },
+  { concepto: "Carreta", kg: 22.2 },
+  { concepto: "Carreta", kg: 21.2 },
+];
+let invProd = null;            // producto elegido en el panel
+let invDescs = [{ cant: "", kg: "", concepto: "" }];
+let invGuardando = false;
+let invSinColumnaPesadas = false; // todavía no se corrió migration_v12.sql
+let invAvisoMigracion = false;
+const invAbiertos = new Set();  // productos con el desplegable abierto en "Inventario de hoy"
 
-  const camposHtml = p.unidad === "KG" ? `
-    <div class="form-grid">
-      <label>Peso (kg)
-        <input type="number" id="invValor" min="0" step="0.01" inputmode="decimal">
-      </label>
-      <label>N° de canastas (opcional)
-        <input type="number" id="invNumCanastas" min="0" step="1" placeholder="Vacío = peso ya neto">
-      </label>
-      <label>Peso por canasta (kg)
-        <input type="number" id="invPesoCanasta" min="0" step="0.01" value="2.2">
-      </label>
-    </div>
-    <div class="calc-line" id="calcLinea">Peso neto: <strong>0 kg</strong></div>
-  ` : `
-    <div class="form-grid">
-      <label>Cantidad (unidades)
-        <input type="number" id="invValor" min="0" step="1" inputmode="numeric">
-      </label>
-    </div>
-  `;
-
-  let badge = "";
-  if (modoEdicion && yaHoy) {
-    badge = '<span class="badge badge-ok">Editando el registro de hoy</span>';
-  } else if (acumulando) {
-    badge = `<span class="badge badge-ok">Ya tienes ${fmt(it.inventarioHoyValor, p.unidad)} hoy · esto se sumará</span>`;
-  }
-
-  container.innerHTML = `
-    <div class="producto-elegido">${escapeHtml(p.codigo)} · ${escapeHtml(p.nombre)} ${badge}</div>
-    ${camposHtml}
-    <label class="campo-simple">Notas (opcional)
-      <input type="text" id="invNotas" placeholder="Opcional">
-    </label>
-    <div class="form-actions">
-      <button type="button" class="btn-primary" id="btnGuardarInventarioInline">${modoEdicion && yaHoy ? "Guardar cambios" : (acumulando ? "Sumar al inventario de hoy" : "Agregar al inventario de hoy")}</button>
-      <button type="button" class="btn-ghost" id="btnCancelarInventarioInline">Cancelar</button>
-    </div>
-  `;
-
-  if (modoEdicion && yaHoy) {
-    document.getElementById("invValor").value = it.inventarioHoyValor;
-    document.getElementById("invNotas").value = it.inventarioHoyNotas || "";
-  }
-
-  if (p.unidad === "KG") {
-    const recalcular = () => {
-      const valor = Number(document.getElementById("invValor").value) || 0;
-      const n = Number(document.getElementById("invNumCanastas").value) || 0;
-      const tara = Number(document.getElementById("invPesoCanasta").value) || 2.2;
-      const neto = n > 0 ? valor - (n * tara) : valor;
-      const el = document.getElementById("calcLinea");
-      el.innerHTML = `Peso neto: <strong>${neto.toLocaleString("es-CO", { maximumFractionDigits: 2 })} kg</strong>` +
-        (n > 0 ? "" : ` <small style="color:var(--muted)">(directo, sin canastas)</small>`);
-      el.classList.toggle("negativo", neto < 0);
-    };
-    ["invValor", "invNumCanastas", "invPesoCanasta"].forEach(id => document.getElementById(id).addEventListener("input", recalcular));
-    recalcular();
-  }
-
-  document.getElementById("btnGuardarInventarioInline").addEventListener("click", () => confirmarInventarioInline(p, acumulando ? { acumular: true } : null));
-  document.getElementById("btnCancelarInventarioInline").addEventListener("click", cerrarFormInventarioInline);
-  document.getElementById("invValor").focus();
+function invKg(n) {
+  return (Number(n) || 0).toLocaleString("es-CO", { maximumFractionDigits: 2 });
 }
-
-function cerrarFormInventarioInline() {
-  const container = document.getElementById("formInventarioInline");
-  container.hidden = true;
-  container.innerHTML = "";
+// Número escrito a mano: acepta coma o punto decimal ("45,2" o "45.2"); si trae
+// los dos, el punto es de miles ("1.234,5").
+function numDecimal(v) {
+  let s = String(v ?? "").trim().replace(/\s/g, "");
+  if (!s) return null;
+  if (s.includes(",") && s.includes(".")) s = s.replace(/\./g, "");
+  const n = Number(s.replace(",", "."));
+  return isNaN(n) ? null : n;
 }
-
-function leerCuerpoInventarioInline(p) {
-  const fecha = fechaTrabajo();
-  const notas = document.getElementById("invNotas").value.trim();
-  const valor = Number(document.getElementById("invValor").value) || 0;
-  if (p.unidad === "UND") {
-    return { productoId: p.id, fecha, valor, notas };
-  }
-  return {
-    productoId: p.id, fecha, valor, notas,
-    numCanastas: Number(document.getElementById("invNumCanastas").value) || 0,
-    pesoCanasta: Number(document.getElementById("invPesoCanasta").value) || 2.2,
+function redondear2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+function descKgDe(ps) {
+  return (ps.desc || []).reduce((s, d) => s + (Number(d.cant) || 1) * (Number(d.kg) || 0), 0);
+}
+function descTexto(ps) {
+  return (ps.desc || []).map(d => `${Number(d.cant) > 1 ? invKg(d.cant) + " × " : ""}${d.concepto || "descuento"} ${invKg(d.kg)} kg`).join(", ");
+}
+// Las pesadas de un conteo. Los conteos guardados antes de las pesadas (o antes
+// de correr la migración) se ven como una sola pesada con sus totales.
+function pesadasDeInventario(row) {
+  if (Array.isArray(row.pesadas) && row.pesadas.length) return row.pesadas;
+  const valor = Number(row.valor) || 0;
+  const conCanastas = row.modo === "bruto" && row.peso_bruto !== null && row.peso_bruto !== undefined;
+  return [{
+    hora: row.hora || "",
+    bruto: conCanastas ? Number(row.peso_bruto) : valor,
+    canastas: conCanastas ? Number(row.num_canastas) || 0 : 0,
+    tara: conCanastas ? Number(row.peso_canasta) || 2.2 : 0,
+    desc: [], neto: valor, nota: row.notas || "",
+  }];
+}
+function totalesPesadas(pesadas) {
+  return pesadas.reduce((t, ps) => {
+    t.bruto += Number(ps.bruto) || 0;
+    t.canastas += Number(ps.canastas) || 0;
+    t.descKg += descKgDe(ps);
+    t.neto += Number(ps.neto) || 0;
+    return t;
+  }, { bruto: 0, canastas: 0, descKg: 0, neto: 0 });
+}
+// Columnas del conteo calculadas desde sus pesadas. Los totales siguen en las
+// columnas de siempre, así "Copiar para Excel" y Despacho funcionan igual.
+function datosInventarioDesdePesadas(p, pesadas) {
+  const t = totalesPesadas(pesadas);
+  const und = p.unidad === "UND";
+  const conTara = !und && pesadas.some(ps => Number(ps.canastas) > 0 || descKgDe(ps) > 0);
+  const ultimaConCanastas = [...pesadas].reverse().find(ps => Number(ps.canastas) > 0);
+  const datos = {
+    valor: redondear2(t.neto),
+    modo: und ? "unidad" : (conTara ? "bruto" : "neto"),
+    peso_bruto: und ? null : redondear2(t.bruto),
+    num_canastas: und ? null : t.canastas,
+    peso_canasta: ultimaConCanastas ? Number(ultimaConCanastas.tara) : null,
+    notas: pesadas.map(ps => String(ps.nota || "").trim()).filter(Boolean).join("; ") || null,
   };
+  if (!invSinColumnaPesadas) datos.pesadas = pesadas;
+  return datos;
 }
 
-async function confirmarInventarioInline(p, cuerpoExtra) {
-  let cuerpo;
-  try {
-    cuerpo = leerCuerpoInventarioInline(p);
-  } catch (e) {
-    toast("Revisa los datos ingresados", true);
-    return;
+// Inserta (id vacío) o actualiza un conteo. Si todavía no existe la columna
+// "pesadas" (falta migration_v12.sql), guarda igual sin el detalle.
+async function invGuardarFila(id, datos) {
+  const intentar = (d) => id
+    ? sb.from("inventarios").update(d).eq("id", id).select().single()
+    : sb.from("inventarios").insert(d).select().single();
+  let { data, error } = await intentar(datos);
+  if (error && "pesadas" in datos && /pesadas/i.test(error.message || "")) {
+    invSinColumnaPesadas = true;
+    const { pesadas, ...sinDetalle } = datos;
+    ({ data, error } = await intentar(sinDetalle));
   }
-  if (cuerpoExtra) Object.assign(cuerpo, cuerpoExtra);
+  throwIfError(error);
+  return data;
+}
 
+// La primera pesada del día deja el stock en lo contado; las siguientes (o quitar
+// una) lo mueven solo por la diferencia, para no borrar lo que ya se haya
+// despachado después. Si hay movimientos de un día posterior, ese stock manda.
+async function ajustarStockPorConteo(productoId, fecha, valorAnterior, valorNuevo, esPrimera) {
+  const s = await fetchStockRow(productoId);
+  if (s && s.fecha > fecha) return;
+  const desdeCero = esPrimera || !s;
+  const fila = {
+    producto_id: productoId, fecha,
+    valor: desdeCero ? redondear2(valorNuevo) : redondear2(Number(s.valor) + (valorNuevo - valorAnterior)),
+    origen: desdeCero ? "inventario" : s.origen,
+  };
+  await upsertStock(productoId, fila.valor, fila.fecha, fila.origen);
+  diaCache.stock.set(productoId, fila);
+}
+
+// Deja en memoria el conteo recién guardado y repinta, sin volver a descargar todo.
+function invAplicarFila(row) {
+  if (row.fecha === diaCache.fecha) diaCache.inv.set(row.id, row);
+  construirEstado();
+  renderInventarioHoy();
+  renderDespachoHoy();
+}
+
+async function guardarPesadaInventario(p, fecha, pesada, motivoEdicion, motivoEdicionNota) {
+  const { data: existentes, error } = await sb.from("inventarios").select("*").eq("producto_id", p.id).eq("fecha", fecha);
+  throwIfError(error);
+  const existente = existentes && existentes.length ? existentes[0] : null;
+  if (existente && fecha !== todayISO() && !motivoEdicion) return { requiereMotivoEdicion: true };
+
+  const pesadas = [...(existente ? pesadasDeInventario(existente) : []), pesada];
+  const datos = datosInventarioDesdePesadas(p, pesadas);
+  const anterior = existente ? Number(existente.valor) : 0;
+  const row = await invGuardarFila(existente ? existente.id : null, existente
+    ? { ...datos, hora: pesada.hora }
+    : { ...datos, producto_id: p.id, fecha, hora: pesada.hora });
+  // Ya no se compara con el día anterior: se limpian diferencias viejas de este conteo.
+  if (existente) await sb.from("diferencias").delete().eq("inventario_id", row.id);
+  await ajustarStockPorConteo(p.id, fecha, anterior, datos.valor, !existente);
+  if (existente && fecha !== todayISO()) {
+    await registrarCorreccion({
+      tipo: "sumar", productoId: p.id, fecha, valorAnterior: anterior, valorNuevo: datos.valor,
+      motivo: motivoEdicion, nota: motivoEdicionNota, inventarioId: row.id,
+    });
+  }
+  invAplicarFila(row);
+  return { n: pesadas.length, total: datos.valor };
+}
+
+async function quitarPesadaInventario(productoId, idx, motivoEdicion, motivoEdicionNota) {
+  if (esSoloLectura()) return;
+  const p = productosPorId[productoId];
+  const fecha = fechaTrabajo();
   try {
-    const resultado = await guardarInventario(p, cuerpo);
-    if (resultado.requiereMotivo) {
-      abrirModalMotivoInventario(p, cuerpo, resultado);
-      return;
+    const { data: filas, error } = await sb.from("inventarios").select("*").eq("producto_id", productoId).eq("fecha", fecha);
+    throwIfError(error);
+    const row = filas && filas.length ? filas[0] : null;
+    if (!row || !p) { toast("Ese conteo ya no existe", true); await refrescarTodo(); return; }
+    const pesadas = pesadasDeInventario(row);
+    if (pesadas.length <= 1) { await quitarInventario(row.id); return; }
+    const ps = pesadas[idx];
+    if (!ps) return;
+    if (!motivoEdicion) {
+      if (fecha !== todayISO()) {
+        abrirModalMotivoCorreccion(
+          "Explica por qué quitas esta pesada",
+          `Este conteo es del <strong>${fechaExcel(fecha)}</strong> (un día anterior). Indica el motivo para quitar la pesada P${idx + 1}.`,
+          (motivo, nota) => { cerrarModal(); quitarPesadaInventario(productoId, idx, motivo, nota); }
+        );
+        return;
+      }
+      if (!confirm(`¿Quitar la pesada P${idx + 1} (${fmt(ps.neto, p.unidad)}) de ${p.nombre}?`)) return;
     }
-    if (resultado.requiereMotivoEdicion) {
+    const datos = datosInventarioDesdePesadas(p, pesadas.filter((_, i) => i !== idx));
+    const nueva = await invGuardarFila(row.id, datos);
+    await ajustarStockPorConteo(productoId, fecha, Number(row.valor), datos.valor, false);
+    if (fecha !== todayISO()) {
+      await registrarCorreccion({
+        tipo: "editar", productoId, fecha, valorAnterior: Number(row.valor), valorNuevo: datos.valor,
+        motivo: motivoEdicion, nota: motivoEdicionNota, inventarioId: row.id,
+      });
+    }
+    invAplicarFila(nueva);
+    toast(`Pesada quitada · ${p.nombre}: ${fmt(datos.valor, p.unidad)}`);
+  } catch (err) {
+    toast(err.message || "No se pudo quitar la pesada", true);
+  }
+}
+
+/* Panel "Producto y pesadas" */
+function invTaraKg() {
+  return Number(document.getElementById("invTipoCanasta").value) || 2.2;
+}
+function invEsUnd() {
+  return !!invProd && invProd.unidad === "UND";
+}
+function invLeerPesada() {
+  const und = invEsUnd();
+  const bruto = numDecimal(document.getElementById("invBruto").value);
+  const canastas = und ? 0 : (numDecimal(document.getElementById("invCanastas").value) || 0);
+  const tara = und ? 0 : invTaraKg();
+  const desc = und ? [] : invDescs
+    .map(d => ({ cant: numDecimal(d.cant) ?? 1, kg: numDecimal(d.kg) || 0, concepto: String(d.concepto || "").trim() }))
+    .filter(d => d.kg > 0 && d.cant > 0);
+  const descKg = desc.reduce((s, d) => s + d.cant * d.kg, 0);
+  const neto = bruto === null ? null : redondear2(bruto - canastas * tara - descKg);
+  return { bruto, canastas, tara, desc, neto };
+}
+function invActualizarCalculo() {
+  const ps = invLeerPesada();
+  document.getElementById("invTara").textContent = ps.canastas ? "−" + invKg(ps.canastas * ps.tara) : "—";
+  const netoEl = document.getElementById("invNeto");
+  netoEl.textContent = ps.neto === null ? "—" : invKg(ps.neto);
+  netoEl.classList.toggle("negativo", ps.neto !== null && ps.neto <= 0);
+  document.querySelectorAll("#invDescRows .desc-row").forEach(fila => {
+    const d = invDescs[+fila.dataset.di];
+    const kg = numDecimal(d.kg), cant = numDecimal(d.cant) ?? 1;
+    fila.querySelector(".d-sub").textContent = kg && cant ? "−" + invKg(kg * cant) + " kg" : "";
+  });
+}
+// Línea de información del producto elegido y número de la pesada (P1, P2...).
+function invRefrescarInfo() {
+  const und = invEsUnd();
+  document.getElementById("invThBruto").textContent = und ? "Cantidad (und)" : "Peso bruto kg";
+  const canastas = document.getElementById("invCanastas");
+  canastas.disabled = und;
+  canastas.placeholder = und ? "—" : "0";
+  if (und) canastas.value = "";
+  document.getElementById("invDescBox").hidden = und;
+  const info = document.getElementById("invProdInfo");
+  if (!invProd) { info.hidden = true; document.getElementById("invPNum").textContent = "P1"; return; }
+  const it = estado.find(e => e.id === invProd.id);
+  const previas = it && it.inventariadoHoy ? it.inventarioHoyPesadas.length : 0;
+  document.getElementById("invPNum").textContent = "P" + (previas + 1);
+  info.innerHTML = `Cód. <b>${escapeHtml(invProd.codigo)}</b> · ${escapeHtml(invProd.unidad)} · ` + (previas
+    ? `Ya van <b>${fmt(it.inventarioHoyValor, invProd.unidad)}</b> en ${previas} pesada${previas > 1 ? "s" : ""}: esta se suma`
+    : "Primera pesada del día");
+  info.hidden = false;
+}
+function invRenderDescs() {
+  if (!invDescs.length) invDescs.push({ cant: "", kg: "", concepto: "" });
+  document.getElementById("invDescRows").innerHTML = invDescs.map((d, i) => `
+    <div class="desc-row" data-di="${i}">
+      <input data-df="cant" inputmode="decimal" autocomplete="off" placeholder="Cant." title="Cantidad" value="${escapeHtml(d.cant)}">
+      <span class="x">×</span>
+      <input data-df="kg" inputmode="decimal" autocomplete="off" placeholder="kg c/u" title="Kilos por unidad" value="${escapeHtml(d.kg)}">
+      <input data-df="concepto" autocomplete="off" placeholder="Concepto (carreta, caja cartón...)" value="${escapeHtml(d.concepto)}">
+      <span class="d-sub"></span>
+      <button type="button" class="icon-x" data-drm="${i}" title="Quitar este descuento" tabindex="-1">✕</button>
+    </div>`).join("");
+  invActualizarCalculo();
+}
+function invSeleccionarProducto(productoId) {
+  const p = productosPorId[productoId];
+  if (!p) return;
+  invProd = p;
+  document.getElementById("buscarInventario").value = p.nombre;
+  invRefrescarInfo();
+  invActualizarCalculo();
+  const bruto = document.getElementById("invBruto");
+  bruto.focus();
+  bruto.select();
+}
+function invLimpiarPesada(tambienProducto) {
+  document.getElementById("invBruto").value = "";
+  document.getElementById("invCanastas").value = "";
+  document.getElementById("invNota").value = "";
+  invDescs = [{ cant: "", kg: "", concepto: "" }];
+  if (tambienProducto) {
+    invProd = null;
+    document.getElementById("buscarInventario").value = "";
+  }
+  invRenderDescs();
+  invRefrescarInfo();
+}
+async function invRegistrarPesada(motivoEdicion, motivoEdicionNota) {
+  if (esSoloLectura()) { toast("Estás en modo solo lectura, no puedes guardar cambios.", true); return; }
+  if (invGuardando) return;
+  if (!invProd) { toast("Elige primero el producto", true); document.getElementById("buscarInventario").focus(); return; }
+  const ps = invLeerPesada();
+  const und = invEsUnd();
+  if (!(ps.bruto > 0)) { toast(und ? "Escribe la cantidad" : "Escribe el peso bruto", true); document.getElementById("invBruto").focus(); return; }
+  if (!(ps.neto > 0)) { toast("El neto quedó en cero o negativo: revisa canastas y descuentos", true); return; }
+  const p = invProd;
+  const fecha = fechaTrabajo();
+  const pesada = { hora: horaActual(), bruto: redondear2(ps.bruto), canastas: ps.canastas, tara: ps.tara, desc: ps.desc, neto: ps.neto };
+  const nota = document.getElementById("invNota").value.trim();
+  if (nota) pesada.nota = nota;
+
+  invGuardando = true;
+  const btn = document.getElementById("btnRegistrarPesada");
+  btn.disabled = true;
+  try {
+    const r = await guardarPesadaInventario(p, fecha, pesada, motivoEdicion, motivoEdicionNota);
+    if (r.requiereMotivoEdicion) {
       abrirModalMotivoCorreccion(
-        "Explica por qué editas este registro",
-        `Este conteo es del <strong>${resultado.fecha}</strong> (un día anterior). Indica el motivo del cambio.`,
-        async (motivo, nota) => {
-          try {
-            const cuerpo2 = Object.assign({}, cuerpo, { motivoEdicion: motivo, motivoEdicionNota: nota });
-            const resultado2 = await guardarInventario(p, cuerpo2);
-            if (resultado2.requiereMotivo) {
-              cerrarModal();
-              abrirModalMotivoInventario(p, cuerpo2, resultado2);
-              return;
-            }
-            cerrarModal();
-            cerrarFormInventarioInline();
-            toast("Guardado con motivo registrado");
-            await refrescarTodo();
-          } catch (err2) {
-            toast(err2.message || "No se pudo guardar", true);
-          }
-        }
+        "Explica por qué cambias este conteo",
+        `El conteo de <strong>${escapeHtml(p.nombre)}</strong> es del <strong>${fechaExcel(fecha)}</strong> (un día anterior). Indica el motivo para sumarle esta pesada.`,
+        (motivo, notaMotivo) => { cerrarModal(); invRegistrarPesada(motivo, notaMotivo); }
       );
       return;
     }
-    cerrarFormInventarioInline();
-    toast("Guardado en el inventario de hoy");
-    await refrescarTodo();
+    toast(`✓ Pesada ${r.n} · ${p.nombre}: ${fmt(pesada.neto, p.unidad)}${r.n > 1 ? ` · total del día ${fmt(r.total, p.unidad)}` : ""}`);
+    if (invSinColumnaPesadas && !invAvisoMigracion) {
+      invAvisoMigracion = true;
+      setTimeout(() => toast("Guardado. Para ver el detalle de cada pesada falta correr migration_v12.sql en Supabase.", true), 3400);
+    }
+    invLimpiarPesada(true);
     document.getElementById("buscarInventario").focus();
   } catch (err) {
-    toast(err.message || "No se pudo guardar el conteo", true);
+    toast(err.message || "No se pudo registrar la pesada", true);
+  } finally {
+    invGuardando = false;
+    btn.disabled = false;
   }
 }
 
-function abrirModalMotivoInventario(p, cuerpoOriginal, info) {
-  const bodyHtml = `
-    <div class="modal-body-grid">
-      <div class="alerta-box">
-        El conteo no coincide con lo esperado.<br>
-        Se esperaba: <strong>${fmt(info.valorEsperado, info.unidad)}</strong> ·
-        Contaste: <strong>${fmt(info.valorNuevo, info.unidad)}</strong>
-      </div>
-      <label>Motivo de la diferencia
-        <select id="motivoSelect">${MOTIVOS.map(m => `<option value="${escapeHtml(m)}">${escapeHtml(m)}</option>`).join("")}</select>
-      </label>
-      <label>Nota (opcional)
-        <input type="text" id="motivoNota" placeholder="Detalle adicional...">
-      </label>
-    </div>
-  `;
-  abrirModal("Explica la diferencia", bodyHtml, {
-    textoConfirmar: "Guardar con motivo",
-    onConfirm: async () => {
-      const motivo = document.getElementById("motivoSelect").value;
-      const motivoNota = document.getElementById("motivoNota").value.trim();
-      try {
-        await guardarInventario(p, Object.assign({}, cuerpoOriginal, { motivo, motivoNota }));
-        cerrarModal();
-        cerrarFormInventarioInline();
-        toast("Guardado con motivo registrado");
-        await refrescarTodo();
-      } catch (err) {
-        toast(err.message || "No se pudo guardar", true);
-      }
-    },
-  });
+document.getElementById("invTipoCanasta").innerHTML = INV_CANASTAS
+  .map(c => `<option value="${c.kg}">${c.nombre} (${invKg(c.kg)} kg)</option>`).join("");
+try {
+  const guardada = localStorage.getItem("inv_tipo_canasta");
+  if (guardada && INV_CANASTAS.some(c => String(c.kg) === guardada)) document.getElementById("invTipoCanasta").value = guardada;
+} catch (err) { /* sin almacenamiento local: queda la de 2,2 kg */ }
+document.getElementById("invTipoCanasta").addEventListener("change", (e) => {
+  try { localStorage.setItem("inv_tipo_canasta", e.target.value); } catch (err) { /* sin almacenamiento local */ }
+  invActualizarCalculo();
+});
+document.getElementById("invDescQuick").innerHTML = INV_DESC_RAPIDOS
+  .map((d, i) => `<button type="button" data-q="${i}" title="Agregar ${escapeHtml(d.concepto)}">+ ${escapeHtml(d.concepto)} ${invKg(d.kg)} kg</button>`).join("")
+  + `<button type="button" class="d-add" data-dadd="1" title="Agregar otra fila de descuento">+ Otro descuento</button>`;
+invRenderDescs();
+
+const invBuscarProducto = document.getElementById("buscarInventario");
+invBuscarProducto.addEventListener("input", () => {
+  if (invProd && invBuscarProducto.value !== invProd.nombre) {
+    invProd = null;
+    invRefrescarInfo();
+    invActualizarCalculo();
+  }
+});
+invBuscarProducto.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.ctrlKey && invProd && document.getElementById("dropdownInventario").hidden) {
+    e.preventDefault();
+    document.getElementById("invBruto").focus();
+  }
+});
+document.getElementById("invBruto").addEventListener("keydown", (e) => {
+  if (e.key !== "Enter" || e.ctrlKey) return;
+  e.preventDefault();
+  if (!e.target.value.trim()) { invBuscarProducto.focus(); invBuscarProducto.select(); return; }
+  if (invEsUnd()) { invRegistrarPesada(); return; }
+  const canastas = document.getElementById("invCanastas");
+  canastas.focus();
+  canastas.select();
+});
+document.getElementById("invCanastas").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.ctrlKey) { e.preventDefault(); invRegistrarPesada(); }
+});
+document.getElementById("invNota").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.ctrlKey) { e.preventDefault(); invRegistrarPesada(); }
+});
+["invBruto", "invCanastas"].forEach(id => document.getElementById(id).addEventListener("input", invActualizarCalculo));
+// Ctrl+Enter registra desde cualquier casilla del panel.
+document.querySelector(".inv-registro").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && e.ctrlKey) { e.preventDefault(); invRegistrarPesada(); }
+});
+document.getElementById("btnRegistrarPesada").addEventListener("click", () => invRegistrarPesada());
+document.getElementById("invLimpiarPesada").addEventListener("click", () => {
+  invLimpiarPesada(false);
+  document.getElementById("invBruto").focus();
+});
+const invDescRows = document.getElementById("invDescRows");
+invDescRows.addEventListener("input", (e) => {
+  const campo = e.target.dataset.df;
+  if (!campo) return;
+  invDescs[+e.target.closest(".desc-row").dataset.di][campo] = e.target.value;
+  invActualizarCalculo();
+});
+invDescRows.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.ctrlKey && e.target.dataset.df) { e.preventDefault(); invRegistrarPesada(); }
+});
+invDescRows.addEventListener("click", (e) => {
+  const b = e.target.closest("[data-drm]");
+  if (!b) return;
+  invDescs.splice(+b.dataset.drm, 1);
+  invRenderDescs();
+});
+// Cada clic en un botón rápido AGREGA un descuento (llena la fila vacía o abre otra).
+document.getElementById("invDescQuick").addEventListener("click", (e) => {
+  const b = e.target.closest("[data-q], [data-dadd]");
+  if (!b) return;
+  let i = invDescs.findIndex(d => !numDecimal(d.kg) && !String(d.concepto).trim());
+  if (b.dataset.dadd) {
+    if (i < 0) { invDescs.push({ cant: "", kg: "", concepto: "" }); i = invDescs.length - 1; }
+  } else {
+    const q = INV_DESC_RAPIDOS[+b.dataset.q];
+    const d = { cant: "1", kg: invKg(q.kg), concepto: q.concepto };
+    if (i < 0) { invDescs.push(d); i = invDescs.length - 1; } else invDescs[i] = d;
+  }
+  invRenderDescs();
+  const campo = document.querySelector(`#invDescRows [data-di="${i}"] [data-df="cant"]`);
+  if (campo) { campo.focus(); campo.select(); }
+});
+
+/* "Inventario de hoy": buscador y desplegable con las pesadas (canastas y kilos brutos) */
+function renderInventarioHoy() {
+  const tbody = document.getElementById("tablaInventarioHoy");
+  const q = normBusqueda(document.getElementById("buscarInvHoy").value);
+  const todas = estado.filter(it => it.inventariadoHoy);
+  const filas = q ? todas.filter(it => coincideBusqueda(q, it.nombre, it.codigo, it.inventarioHoyNotas)) : todas;
+  document.getElementById("invHoyResumen").textContent = !todas.length ? ""
+    : q ? `${filas.length} de ${todas.length} producto(s)` : `${todas.length} producto(s)`;
+  tbody.innerHTML = filas.map(filaInventarioHoy).join("")
+    || `<tr class="empty-row"><td colspan="6">${todas.length ? "Ningún producto del inventario de hoy coincide con la búsqueda." : "Todavía no has agregado productos al inventario de hoy."}</td></tr>`;
+  invRefrescarInfo();
 }
+function filaInventarioHoy(it) {
+  const abierto = invAbiertos.has(it.id);
+  return `
+    <tr class="inv-fila${abierto ? " abierta" : ""}" data-inv-toggle="${it.id}" title="${abierto ? "Ocultar" : "Ver"} canastas y kilos brutos">
+      <td class="inv-tg"><span class="inv-flecha">▸</span></td>
+      <td><strong>${escapeHtml(it.nombre)}</strong> <span class="ped-cod">${escapeHtml(it.codigo)}</span></td>
+      <td class="num"><strong>${fmt(it.inventarioHoyValor, it.unidad)}</strong></td>
+      <td class="num">${it.inventarioHoyPesadas.length}</td>
+      <td>${escapeHtml(it.inventarioHoyNotas || "")}</td>
+      <td class="inv-acc"><button type="button" class="btn-icon danger" data-quitar-inv="${it.inventarioId}" title="Quitar todo el conteo de este producto">Quitar</button></td>
+    </tr>${abierto ? detalleInventarioHoy(it) : ""}`;
+}
+function detalleInventarioHoy(it) {
+  const und = it.unidad === "UND";
+  const pesadas = it.inventarioHoyPesadas;
+  const t = totalesPesadas(pesadas);
+  const filas = pesadas.map((ps, i) => {
+    const descKg = descKgDe(ps);
+    return `<tr>
+      <td><strong>P${i + 1}</strong></td>
+      <td>${escapeHtml(ps.hora || "")}</td>
+      <td class="num">${und ? fmt(ps.bruto, "UND") : invKg(ps.bruto) + " kg"}</td>
+      <td class="num">${!und && Number(ps.canastas) ? `${invKg(ps.canastas)} × ${invKg(ps.tara)} = ${invKg(ps.canastas * ps.tara)} kg` : "—"}</td>
+      <td class="num">${descKg ? `${invKg(descKg)} kg <small>${escapeHtml(descTexto(ps))}</small>` : "—"}</td>
+      <td class="num"><strong>${fmt(ps.neto, it.unidad)}</strong></td>
+      <td>${escapeHtml(ps.nota || "")}</td>
+      <td><button type="button" class="btn-icon danger" data-quitar-pesada="${it.id}|${i}" title="Quitar esta pesada">✕</button></td>
+    </tr>`;
+  }).join("");
+  const resumen = und
+    ? `Neto: <b>${fmt(t.neto, it.unidad)}</b>`
+    : `Canastas: <b>${invKg(t.canastas)}</b> · Kilos brutos: <b>${invKg(t.bruto)} kg</b>${t.descKg ? ` · Descuentos: <b>${invKg(t.descKg)} kg</b>` : ""} · Neto: <b>${fmt(t.neto, it.unidad)}</b>`;
+  return `
+    <tr class="inv-detalle"><td></td><td colspan="5">
+      <div class="inv-det-tot">${resumen}</div>
+      <div class="table-wrap"><table class="inv-det-tabla">
+        <thead><tr><th>#</th><th>Hora</th><th class="num">${und ? "Cantidad" : "Bruto"}</th><th class="num">Canastas</th><th class="num">Descuentos</th><th class="num">Neto</th><th>Nota</th><th></th></tr></thead>
+        <tbody>${filas}</tbody>
+      </table></div>
+    </td></tr>`;
+}
+document.getElementById("tablaInventarioHoy").addEventListener("click", (e) => {
+  const quitar = e.target.closest("[data-quitar-inv]");
+  if (quitar) { quitarInventario(quitar.dataset.quitarInv); return; }
+  const quitarPesada = e.target.closest("[data-quitar-pesada]");
+  if (quitarPesada) {
+    const [productoId, idx] = quitarPesada.dataset.quitarPesada.split("|");
+    quitarPesadaInventario(productoId, Number(idx));
+    return;
+  }
+  const fila = e.target.closest("[data-inv-toggle]");
+  if (!fila) return;
+  const id = fila.dataset.invToggle;
+  if (invAbiertos.has(id)) invAbiertos.delete(id); else invAbiertos.add(id);
+  renderInventarioHoy();
+});
+const invHoyBuscar = document.getElementById("buscarInvHoy");
+const invHoyBuscarX = document.getElementById("buscarInvHoyX");
+function limpiarBuscarInvHoy() {
+  invHoyBuscar.value = "";
+  invHoyBuscarX.hidden = true;
+  renderInventarioHoy();
+  invHoyBuscar.focus({ preventScroll: true });
+}
+invHoyBuscar.addEventListener("input", () => {
+  invHoyBuscarX.hidden = !invHoyBuscar.value;
+  renderInventarioHoy();
+});
+invHoyBuscar.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && invHoyBuscar.value) limpiarBuscarInvHoy();
+});
+invHoyBuscarX.addEventListener("click", limpiarBuscarInvHoy);
 
 /* ==========================================================================
    SUGERIDO DEL DIA (importado desde Google Sheets, pegando el rango copiado)
@@ -1063,16 +1309,11 @@ function filaDespachoHoy(d) {
   `;
 }
 
+// Usa los despachos del día que ya están en memoria (los carga cargarEstado y
+// los mantiene al día el tiempo real).
 async function renderDespachoHoy() {
-  let items;
-  try {
-    const { data, error } = await sb.from("despachos").select("*").eq("fecha", fechaTrabajo()).order("hora");
-    throwIfError(error);
-    items = (data || []).map(mapDespacho);
-  } catch (err) {
-    toast(err.message || "No se pudo cargar el despacho de hoy", true);
-    return;
-  }
+  const items = Array.from(diaCache.desp.values()).map(mapDespacho)
+    .sort((a, b) => (a.hora || "").localeCompare(b.hora || "") || (a.creadoEn || "").localeCompare(b.creadoEn || ""));
   const tbody = document.getElementById("tablaDespachoHoy");
   tbody.innerHTML = items.map(filaDespachoHoy).join("") || `<tr class="empty-row"><td colspan="8">Sin despachos todavía.</td></tr>`;
   tbody.querySelectorAll("[data-quitar-desp]").forEach(b => b.addEventListener("click", async () => {
@@ -1241,7 +1482,7 @@ async function confirmarDespachoForzado(p, cuerpo) {
   }
 }
 
-wireAutocomplete("buscarInventario", "dropdownInventario", seleccionarProductoInventario);
+wireAutocomplete("buscarInventario", "dropdownInventario", invSeleccionarProducto);
 wireAutocomplete("buscarDespacho", "dropdownDespacho", seleccionarProductoDespacho);
 
 /* ==========================================================================
@@ -2448,10 +2689,11 @@ document.getElementById("tablaPedido").addEventListener("click", (e) => {
   abrirNotaPedido(fila, destino, estado);
 });
 
-// Los demas companeros ven los cambios sin recargar: se refresca solo cada 20 s
-// mientras la pestana esta abierta.
+// Los demas companeros ven los cambios sin recargar: con el tiempo real activo
+// llegan al instante; si no esta activo, se refresca solo cada 20 s mientras la
+// pestana esta abierta.
 setInterval(async () => {
-  if (!rolActual() || document.hidden || pedidoEscribiendo > 0) return;
+  if (realtimeActivo || !rolActual() || document.hidden || pedidoEscribiendo > 0) return;
   if (!document.getElementById("tab-pedido").classList.contains("active")) return;
   if (!document.getElementById("modalOverlay").hidden) return;
   await cargarPedido();
@@ -3528,6 +3770,108 @@ document.getElementById("cjContenido").addEventListener("focusout", (e) => {
 });
 
 /* ==========================================================================
+   TIEMPO REAL: cuando otro equipo guarda algo, esta pantalla se entera al
+   instante (Supabase Realtime) en vez de esperar a que alguien recargue.
+   Los cambios del día (inventario, despachos, stock, sugerido, pedido) se
+   aplican directo en memoria con lo que llega, sin volver a descargar todo.
+   Plátano y Caja se recargan solo si esa pestaña está abierta. Necesita que
+   las tablas estén en la publicación "supabase_realtime" (migration_v12.sql);
+   si no, la app sigue funcionando como antes (el Pedido se refresca cada 20 s).
+   ========================================================================== */
+const RT_TABLAS = [
+  "productos", "stock", "inventarios", "despachos", "sugeridos", "pedido_dia",
+  "platano_entradas", "platano_maduracion", "platano_salidas", "platano_ajustes_canastas",
+  "caja_config", "caja_categorias", "caja_movimientos", "caja_cierres", "caja_reaperturas",
+];
+let realtimeActivo = false;
+const rtPendiente = new Set();
+let rtTimer = null;
+
+function rtProgramar(que) {
+  rtPendiente.add(que);
+  clearTimeout(rtTimer);
+  rtTimer = setTimeout(rtAplicar, 250); // agrupa ráfagas (ej. importar el sugerido)
+}
+async function rtAplicar() {
+  const que = new Set(rtPendiente);
+  rtPendiente.clear();
+  const activa = document.querySelector(".tab-panel.active")?.id;
+  try {
+    if (que.has("productos")) { await cargarProductos(); renderTablaProductos(); }
+    if (que.has("dia") || que.has("productos")) {
+      construirEstado();
+      renderInventarioHoy();
+      await renderDespachoHoy();
+    }
+    if (que.has("pedido") && activa === "tab-pedido") renderPedido();
+    if (que.has("platano") && activa === "tab-platano") { await cargarPlatano(); renderPlatano(); }
+    if (que.has("caja") && activa === "tab-caja") { await cargarCaja(); renderCaja(); }
+  } catch (err) {
+    // El siguiente cambio o el próximo refresco lo corrigen.
+  }
+}
+function rtAlCambio(tabla, payload) {
+  const borrado = payload.eventType === "DELETE";
+  const nuevo = payload.new || {};
+  const viejo = payload.old || {};
+  if (tabla === "stock") {
+    if (borrado) diaCache.stock.delete(viejo.producto_id); else diaCache.stock.set(nuevo.producto_id, nuevo);
+    rtProgramar("dia");
+  } else if (tabla === "inventarios" || tabla === "despachos") {
+    const mapa = tabla === "inventarios" ? diaCache.inv : diaCache.desp;
+    if (borrado) mapa.delete(viejo.id);
+    else if (nuevo.fecha === diaCache.fecha) mapa.set(nuevo.id, nuevo);
+    else mapa.delete(nuevo.id);
+    rtProgramar("dia");
+  } else if (tabla === "sugeridos") {
+    if (borrado) { if (!viejo.fecha || viejo.fecha === diaCache.fecha) diaCache.sug.delete(viejo.producto_id); }
+    else if (nuevo.fecha === diaCache.fecha) diaCache.sug.set(nuevo.producto_id, nuevo);
+    rtProgramar("dia");
+  } else if (tabla === "productos") {
+    rtProgramar("productos");
+  } else if (tabla === "pedido_dia") {
+    if (borrado) {
+      pedidoFilas = pedidoFilas.filter(f => f.id !== viejo.id);
+    } else if (nuevo.fecha === fechaTrabajo()) {
+      const i = pedidoFilas.findIndex(f => f.id === nuevo.id);
+      if (i >= 0) pedidoFilas[i] = nuevo;
+      else { pedidoFilas.push(nuevo); pedidoFilas.sort((a, b) => (Number(a.orden) || 0) - (Number(b.orden) || 0)); }
+    }
+    rtProgramar("pedido");
+  } else if (tabla.startsWith("platano_")) {
+    rtProgramar("platano");
+  } else if (tabla.startsWith("caja_")) {
+    rtProgramar("caja");
+  }
+}
+function iniciarTiempoReal() {
+  if (typeof sb.channel !== "function") return;
+  const canal = sb.channel("plaza-or-cambios");
+  RT_TABLAS.forEach(tabla => canal.on("postgres_changes", { event: "*", schema: "public", table: tabla }, (payload) => rtAlCambio(tabla, payload)));
+  canal.subscribe((status) => { realtimeActivo = status === "SUBSCRIBED"; });
+}
+
+// Si la pestaña estuvo escondida un rato (equipo suspendido, otra ventana), al
+// volver se refresca lo que se ve, por si se perdió algún aviso mientras tanto.
+let ocultaDesde = 0;
+document.addEventListener("visibilitychange", async () => {
+  if (document.hidden) { ocultaDesde = Date.now(); return; }
+  if (!ocultaDesde || Date.now() - ocultaDesde < 60000 || !rolActual()) return;
+  ocultaDesde = 0;
+  try {
+    await cargarEstado();
+    renderInventarioHoy();
+    await renderDespachoHoy();
+    const activa = document.querySelector(".tab-panel.active")?.id;
+    if (activa === "tab-pedido") { await cargarPedido(); renderPedido(); }
+    if (activa === "tab-platano") { await cargarPlatano(); renderPlatano(); }
+    if (activa === "tab-caja") { await cargarCaja(); renderCaja(); }
+  } catch (err) {
+    // Sin conexión: el próximo cambio o refresco lo corrige.
+  }
+});
+
+/* ==========================================================================
    RECORDATORIO DE MERCANCÍA DELICADA (solo con la clave de edición total,
    OR2026). Mientras se está despachando, avisa dos veces en la mañana (hacia
    las 7:00 y hacia las 8:00) que revisen con cuidado lo ya despachado de
@@ -3599,4 +3943,5 @@ document.addEventListener("visibilitychange", () => { if (!document.hidden) revi
 
 document.getElementById("fechaTrabajo").value = todayISO();
 refrescarTodo();
+iniciarTiempoReal();
 revisarRecordatorioDelicados();
