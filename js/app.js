@@ -2188,9 +2188,9 @@ function abrirEditarPlatanoMovimiento(origen, id) {
       if (!fecha) { toast("Selecciona la fecha", true); return; }
       if (!destino) { toast("Indica a quién se despachó", true); return; }
       if (bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
-      if (canastas <= 0) { toast("Ingresa las canastas", true); return; }
       if (producto === "MADURO" && !lote) { toast("Indica el lote", true); return; }
       if (!motivo) { toast("Escribe el motivo de la edición", true); return; }
+      if (canastas <= 0 && !confirm("No ingresaste canastas: el peso bruto se toma como neto, sin descontar canastas. ¿Deseas seguir?")) return;
       guardarEdicionPlatano(origen, id, {
         fecha, producto, lote, destino, peso_bruto: bruto, canastas, peso_neto: pesoNetoPlatano(bruto, canastas), es_pago_prestamo: esPago,
       }, motivo, r);
@@ -2432,7 +2432,7 @@ async function guardarPlatanoMaduracion(forzarRatio, forzarDisponible) {
 }
 document.getElementById("btnGuardarPlatanoMaduracion").addEventListener("click", () => guardarPlatanoMaduracion(false, false));
 
-async function guardarPlatanoSalida(forzarRatio, forzarDisponible) {
+async function guardarPlatanoSalida(forzarRatio, forzarDisponible, forzarSinCanastas) {
   if (esSoloLecturaPlatano()) { toast("Estás en modo solo lectura, no puedes registrar salidas.", true); return; }
   const producto = document.getElementById("psProducto").value;
   const destino = document.getElementById("psDestino").value.trim();
@@ -2445,8 +2445,18 @@ async function guardarPlatanoSalida(forzarRatio, forzarDisponible) {
   if (!producto) { toast("Selecciona si es verde o maduro", true); return; }
   if (!destino) { toast(esPago ? "Indica el proveedor del préstamo" : "Indica a quién se despachó", true); return; }
   if (!brutoInput || bruto <= 0) { toast("Ingresa el peso bruto", true); return; }
-  if (!canastasInput || canastas <= 0) { toast("Ingresa las canastas", true); return; }
   if (producto === "MADURO" && !lote) { toast("Selecciona un lote", true); return; }
+  // Hay plátano que sale sin canastas (por ejemplo, el que entró sin ellas): se
+  // avisa y, si se confirma, el peso bruto queda como neto.
+  if (canastas <= 0 && !forzarSinCanastas) {
+    abrirModal("No ingresaste canastas", `
+      <div class="alerta-box">
+        Esta salida no tiene canastas, así que el peso bruto (<strong>${fmtKgPlatano(bruto)}</strong>) se toma como neto, sin descontar canastas.<br>
+        ¿Deseas seguir?
+      </div>
+    `, { textoConfirmar: "Sí, seguir sin canastas", onConfirm: () => { cerrarModal(); guardarPlatanoSalida(forzarRatio, forzarDisponible, true); } });
+    return;
+  }
   const inusual = platanoRatioInusual(bruto, canastas);
   if (inusual && !forzarRatio) {
     abrirModal("Este dato se ve inusual", `
@@ -2454,7 +2464,7 @@ async function guardarPlatanoSalida(forzarRatio, forzarDisponible) {
         Este ingreso da <strong>${inusual.ratio.toFixed(1)} kg por canasta</strong>, y lo usual según el histórico es cerca de <strong>${inusual.media.toFixed(1)} kg por canasta</strong> (${inusual.desviacionPct > 0 ? "+" : ""}${inusual.desviacionPct.toFixed(0)}%).<br>
         Revisa que el peso bruto y las canastas estén bien digitados.<br>¿Guardar de todas formas?
       </div>
-    `, { textoConfirmar: "Sí, guardar igual", onConfirm: () => { cerrarModal(); guardarPlatanoSalida(true, forzarDisponible); } });
+    `, { textoConfirmar: "Sí, guardar igual", onConfirm: () => { cerrarModal(); guardarPlatanoSalida(true, forzarDisponible, forzarSinCanastas); } });
     return;
   }
   const neto = pesoNetoPlatano(bruto, canastas);
@@ -2470,7 +2480,7 @@ async function guardarPlatanoSalida(forzarRatio, forzarDisponible) {
         Vas a despachar: <strong>${fmtKgPlatano(neto)}</strong><br>
         ¿Continuar de todas formas? Quedará registrado con saldo negativo.
       </div>
-    `, { textoConfirmar: "Sí, despachar igual", onConfirm: () => { cerrarModal(); guardarPlatanoSalida(forzarRatio, true); } });
+    `, { textoConfirmar: "Sí, despachar igual", onConfirm: () => { cerrarModal(); guardarPlatanoSalida(forzarRatio, true, forzarSinCanastas); } });
     return;
   }
   try {
@@ -2491,7 +2501,7 @@ async function guardarPlatanoSalida(forzarRatio, forzarDisponible) {
     toast(err.message || "No se pudo registrar la salida", true);
   }
 }
-document.getElementById("btnGuardarPlatanoSalida").addEventListener("click", () => guardarPlatanoSalida(false, false));
+document.getElementById("btnGuardarPlatanoSalida").addEventListener("click", () => guardarPlatanoSalida(false, false, false));
 
 /* ==========================================================================
    PEDIDO (pedido del dia de Bello y Colores + estado de despacho)
