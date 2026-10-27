@@ -78,8 +78,8 @@ function puedeMarcarPedido() {
   const rol = rolActual();
   return rol === "editar" || rol === "caja";
 }
-// Con la clave de plantano solo se ven estas pestanas (la ultima es la de entrada).
-const TABS_PERMITIDAS = { platano: ["pedido", "platano"] };
+// Con la clave de platano solo se ve la pestana Platano.
+const TABS_PERMITIDAS = { platano: ["platano"] };
 // La pestana "Caja" es la unica que NO sigue la regla de arriba: es exclusiva
 // de la clave de caja (rol "caja"), ni siquiera la clave de edicion total la ve.
 function aplicarRolEnPantalla() {
